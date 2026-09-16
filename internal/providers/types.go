@@ -27,6 +27,5 @@ type Chunk struct {
 	Usage   *Usage
 	Content string
 	Done    bool
-	Err     ProviderError
+	Err     *ProviderError
 }
-
