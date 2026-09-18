@@ -6,6 +6,7 @@ import (
 
 	"github.com/Devpaul-01/llm-gateway/internal/config"
 	"github.com/Devpaul-01/llm-gateway/internal/db"
+	"github.com/Devpaul-01/llm-gateway/internal/redisclient"
 	"github.com/joho/godotenv"
 )
 
@@ -23,7 +24,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("connecting to database: %v", err)
 	}
-	defer pool.Close()
-
 	log.Println("connected to database successfully")
+
+	defer pool.Close()
+	redisClient, err := redisclient.Connect(ctx, cfg.RedisURL)
+	if err != nil {
+		log.Fatalf("connecting to redis: %v", err)
+	}
+	defer redisClient.Close()
+
+	log.Println("connected to redis successfully")
+
 }
