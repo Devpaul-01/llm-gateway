@@ -14,7 +14,7 @@ type modelChoice struct {
 }
 
 var defaultPriority = []modelChoice{
-	{Provider: "groq", Model: "llama-3.3-70b-versatile"},
+	{Provider: "groq", Model: "openai/gpt-oss-120b"},
 }
 
 // inferProviderForModel is a temporary, Groq-only mapping. Once more
