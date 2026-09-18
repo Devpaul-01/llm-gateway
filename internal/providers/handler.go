@@ -2,16 +2,16 @@ package providers
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 )
 
-func HandleChat(ctx context.Context, req Request) (<-chan Chunk, error) {
-	candidates, err := resolveCandidates(req)
+func HandleChat(ctx context.Context, db *sql.DB, projectID string, encryptionKey []byte, req Request) (<-chan Chunk, error) {
+	candidates, err := resolveCandidates(ctx, db, projectID, encryptionKey, req)
 	if err != nil {
 		return nil, err
 	}
 	return handleChatWithCandidates(ctx, req, candidates)
-
 }
 
 func handleChatWithCandidates(ctx context.Context, req Request, candidates []Candidate) (<-chan Chunk, error) {
@@ -63,5 +63,3 @@ func handleChatWithCandidates(ctx context.Context, req Request, candidates []Can
 
 	return out, nil
 }
-
-
