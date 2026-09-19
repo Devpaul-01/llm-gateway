@@ -59,6 +59,10 @@ func handleChatWithCandidates(ctx context.Context, req Request, candidates []Can
 
 			// channel closed cleanly without a Done chunk — try next candidate
 		}
+		select {
+		case <-ctx.Done():
+		case out <- Chunk{Err: &ProviderError{Category: NonRetryable, Cause: errors.New("all candidates failed")}}:
+		}
 	}()
 
 	return out, nil

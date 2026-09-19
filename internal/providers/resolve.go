@@ -59,10 +59,12 @@ func resolveCandidates(ctx context.Context, db *sql.DB, projectID string, encryp
 			})
 		}
 	}
+	
 
 	if len(candidates) == 0 {
 		return nil, &ProviderError{Category: NonRetryable, Cause: fmt.Errorf("no usable candidates for request")}
 	}
+
 
 	return candidates, nil
 }

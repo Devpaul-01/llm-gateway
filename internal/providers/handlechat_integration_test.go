@@ -50,9 +50,10 @@ func TestHandleChat_EndToEnd_RealGroq(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inserting test credential: %v", err)
 	}
-		out, err := HandleChat(ctx, pool, projectID, encryptionKey, Request{
-		Messages: []Message{{Role: "user", Content: "Say the single word: hello"}},
-		MaxTokens: 20,
+	out, err := HandleChat(ctx, pool, projectID, encryptionKey, Request{
+		Messages:    []Message{{Role: "user", Content: "Say the single word: hello"}},
+		MaxTokens:   200,
+		Model:       "openai/gpt-oss-120b",
 		Temperature: 0.0,
 	})
 	if err != nil {
