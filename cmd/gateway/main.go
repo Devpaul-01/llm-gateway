@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 
 	"github.com/Devpaul-01/llm-gateway/internal/config"
 	"github.com/Devpaul-01/llm-gateway/internal/db"
+	"github.com/Devpaul-01/llm-gateway/internal/httpserver"
 	"github.com/Devpaul-01/llm-gateway/internal/redisclient"
 	"github.com/joho/godotenv"
 )
@@ -34,5 +36,10 @@ func main() {
 	defer redisClient.Close()
 
 	log.Println("connected to redis successfully")
+	mux := httpserver.New()
+	log.Println("starting server on :8080")
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		log.Fatalf("server error: %v", err)
+	}
 
 }
