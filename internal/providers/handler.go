@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log"
 )
 
 func HandleChat(ctx context.Context, db *sql.DB, projectID string, encryptionKey []byte, req Request) (<-chan Chunk, error) {
@@ -23,8 +24,12 @@ func handleChatWithCandidates(ctx context.Context, req Request, candidates []Can
 	go func() {
 		defer close(out)
 		for _, candidate := range candidates {
-			providerCh, err := candidate.Provider.Chat(ctx, req)
+			candidateReq := req
+			candidateReq.Model = candidate.Model
+			providerCh, err := candidate.Provider.Chat(ctx, candidateReq)
+
 			if err != nil {
+				log.Printf("[handler debug] candidate %s failed pre-stream: %v", candidate.Label, err)
 				continue
 			}
 

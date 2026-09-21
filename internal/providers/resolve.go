@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 
 	"github.com/Devpaul-01/llm-gateway/internal/credentials"
 )
@@ -35,6 +36,7 @@ func newProviderAdapter(provider, apiKey string) Provider {
 		return nil
 	}
 }
+
 func resolveCandidates(ctx context.Context, db *sql.DB, projectID string, encryptionKey []byte, req Request) ([]Candidate, error) {
 	var choices []modelChoice
 
@@ -43,13 +45,16 @@ func resolveCandidates(ctx context.Context, db *sql.DB, projectID string, encryp
 	} else {
 		choices = defaultPriority
 	}
+	log.Printf("[resolve debug] projectID=%s choices=%+v", projectID, choices)
 
 	var candidates []Candidate
 	for _, choice := range choices {
 		creds, err := credentials.GetByProjectAndProvider(ctx, db, projectID, choice.Provider, encryptionKey)
 		if err != nil {
+			log.Printf("[resolve debug] error fetching credentials for provider=%s: %v", choice.Provider, err)
 			return nil, err
 		}
+		log.Printf("[resolve debug] provider=%s found %d credential(s)", choice.Provider, len(creds))
 
 		for _, cred := range creds {
 			candidates = append(candidates, Candidate{
@@ -59,12 +64,10 @@ func resolveCandidates(ctx context.Context, db *sql.DB, projectID string, encryp
 			})
 		}
 	}
-	
 
 	if len(candidates) == 0 {
 		return nil, &ProviderError{Category: NonRetryable, Cause: fmt.Errorf("no usable candidates for request")}
 	}
-
 
 	return candidates, nil
 }

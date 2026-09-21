@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"log"
 	"net/http"
 
@@ -36,7 +37,12 @@ func main() {
 	defer redisClient.Close()
 
 	log.Println("connected to redis successfully")
-	mux := httpserver.New()
+	encryptionKey, err := hex.DecodeString(cfg.EncryptionKey)
+	if err != nil {
+		log.Fatalf("decoding encryption key: %v", err)
+	}
+
+	mux := httpserver.New(pool, encryptionKey)
 	log.Println("starting server on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
 		log.Fatalf("server error: %v", err)
