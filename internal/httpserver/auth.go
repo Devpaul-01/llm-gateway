@@ -31,6 +31,11 @@ func handleChatCompletions(db *sql.DB, encryptionKey []byte) http.HandlerFunc {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		gatewayKeyID, ok := GatewayKeyIDFromContext(r.Context())
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 
 		var reqBody chatCompletionRequest
 		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
@@ -55,7 +60,7 @@ func handleChatCompletions(db *sql.DB, encryptionKey []byte) http.HandlerFunc {
 			MaxTokens:   maxTokens,
 		}
 
-		out, err := providers.HandleChat(r.Context(), db, projectID, encryptionKey, req)
+		out, err := providers.HandleChat(r.Context(), db, projectID, gatewayKeyID, encryptionKey, req)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -86,6 +91,7 @@ func RequireGatewayKey(db *sql.DB, next http.Handler) http.Handler {
 		}
 
 		ctx := context.WithValue(r.Context(), projectIDContextKey{}, key.ProjectID)
+		ctx = context.WithValue(ctx, gatewayKeyIDContextKey{}, key.ID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -94,5 +100,12 @@ type projectIDContextKey struct{}
 
 func ProjectIDFromContext(ctx context.Context) (string, bool) {
 	id, ok := ctx.Value(projectIDContextKey{}).(string)
+	return id, ok
+}
+
+type gatewayKeyIDContextKey struct{}
+
+func GatewayKeyIDFromContext(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(gatewayKeyIDContextKey{}).(string)
 	return id, ok
 }
