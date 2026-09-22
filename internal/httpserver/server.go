@@ -2,10 +2,11 @@ package httpserver
 
 import (
 	"database/sql"
+	"github.com/redis/go-redis/v9"
 	"net/http"
 )
 
-func New(db *sql.DB, encryptionKey []byte) *http.ServeMux {
+func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -14,7 +15,7 @@ func New(db *sql.DB, encryptionKey []byte) *http.ServeMux {
 	})
 
 	chatHandler := handleChatCompletions(db, encryptionKey)
-	mux.Handle("POST /v1/chat/completions", RequireGatewayKey(db, chatHandler))
+	mux.Handle("POST /v1/chat/completions", RequireGatewayKey(db, rdb, chatHandler))
 
 	return mux
 }

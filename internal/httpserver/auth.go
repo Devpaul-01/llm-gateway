@@ -5,9 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"github.com/Devpaul-01/llm-gateway/internal/ratelimit"
+	"time"
 	"strings"
 
 	"github.com/Devpaul-01/llm-gateway/internal/gatewaykeys"
+	"github.com/redis/go-redis/v9"
 	"github.com/Devpaul-01/llm-gateway/internal/providers"
 )
 
@@ -70,7 +73,7 @@ func handleChatCompletions(db *sql.DB, encryptionKey []byte) http.HandlerFunc {
 	}
 }
 
-func RequireGatewayKey(db *sql.DB, next http.Handler) http.Handler {
+func RequireGatewayKey(db *sql.DB, rdb *redis.Client, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		const prefix = "Bearer "
