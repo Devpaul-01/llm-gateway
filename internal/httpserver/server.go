@@ -7,7 +7,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte) *http.ServeMux {
+func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte, adminToken string) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -17,6 +17,10 @@ func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte) *http.ServeMux {
 
 	chatHandler := handleChatCompletions(db, rdb, encryptionKey)
 	mux.Handle("POST /v1/chat/completions", RequireGatewayKey(db, rdb, chatHandler))
+
+	mux.Handle("POST /admin/projects", RequireAdminToken(adminToken, handleCreateProject(db)))
+	mux.Handle("POST /admin/gateway-keys", RequireAdminToken(adminToken, handleCreateGatewayKey(db)))
+	mux.Handle("POST /admin/credentials", RequireAdminToken(adminToken, handleCreateCredential(db, encryptionKey)))
 
 	return mux
 }

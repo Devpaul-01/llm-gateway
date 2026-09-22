@@ -9,6 +9,7 @@ type Config struct {
 	DatabaseURL   string
 	EncryptionKey string
 	RedisURL      string
+	AdminToken    string
 }
 
 func Load() (*Config, error) {
@@ -26,9 +27,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("redis url environment variable is required")
 	}
 
+	adminToken := os.Getenv("ADMIN_TOKEN")
+
 	return &Config{
 		DatabaseURL:   dbURL,
 		EncryptionKey: key,
 		RedisURL:      redisUrl,
+		AdminToken:    adminToken,
 	}, nil
 }
