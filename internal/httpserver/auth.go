@@ -5,13 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"github.com/Devpaul-01/llm-gateway/internal/ratelimit"
-	"time"
 	"strings"
 
+	"github.com/Devpaul-01/llm-gateway/internal/concurrency"
 	"github.com/Devpaul-01/llm-gateway/internal/gatewaykeys"
-	"github.com/redis/go-redis/v9"
 	"github.com/Devpaul-01/llm-gateway/internal/providers"
+	"github.com/redis/go-redis/v9"
 )
 
 type chatCompletionRequest struct {
@@ -27,7 +26,7 @@ type chatMessageJSON struct {
 	Content string `json:"content"`
 }
 
-func handleChatCompletions(db *sql.DB, encryptionKey []byte) http.HandlerFunc {
+func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectID, ok := ProjectIDFromContext(r.Context())
 		if !ok {
@@ -39,6 +38,17 @@ func handleChatCompletions(db *sql.DB, encryptionKey []byte) http.HandlerFunc {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+
+		allowed, err := concurrency.Acquire(r.Context(), rdb, projectID, 10)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !allowed {
+			http.Error(w, "too many concurrent requests for this project", http.StatusTooManyRequests)
+			return
+		}
+		defer concurrency.Release(context.Background(), rdb, projectID)
 
 		var reqBody chatCompletionRequest
 		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
