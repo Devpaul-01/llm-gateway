@@ -18,14 +18,22 @@ var defaultPriority = []modelChoice{
 	{Provider: "groq", Model: "openai/gpt-oss-120b"},
 }
 
+// inferProviderForModel is a temporary, Groq-only mapping. Once more
+// providers are added, this needs a real model->provider lookup table
+// (or the client should be able to name the provider explicitly).
 func inferProviderForModel(model string) string {
 	return "groq"
 }
 
+// newProviderAdapter constructs the right Provider implementation for a
+// given provider name. Only "groq" is implemented so far; this grows
+// into a real switch/registry as more adapters are built.
 func newProviderAdapter(provider, apiKey string) Provider {
 	switch provider {
 	case "groq":
 		return &GroqProvider{APIKey: apiKey, BaseURL: "https://api.groq.com/openai/v1"}
+	case "mistral":
+		return &MistralProvider{APIKey: apiKey, BaseURL: "https://api.mistral.ai/v1"}
 	default:
 		return nil
 	}
