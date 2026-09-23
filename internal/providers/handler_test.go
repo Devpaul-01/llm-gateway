@@ -3,8 +3,12 @@ package providers
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"testing"
 )
+
+var testLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func TestHandleChat_StopsOnMidStreamFailure(t *testing.T) {
 	fp := &FakeProvider{
@@ -23,7 +27,7 @@ func TestHandleChat_StopsOnMidStreamFailure(t *testing.T) {
 	out, err := handleChatWithCandidates(context.Background(), Request{}, []Candidate{
 		{Provider: fp, Model: "model-a", Label: "candidate-1"},
 		{Provider: fp2, Model: "model-a", Label: "candidate-2"},
-	}, requestLogContext{})
+	}, requestLogContext{}, testLogger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -57,7 +61,7 @@ func TestHandleChat_FailsOverAfterPreStreamError(t *testing.T) {
 	out, err := handleChatWithCandidates(context.Background(), Request{}, []Candidate{
 		{Provider: fp1, Model: "model-a", Label: "candidate-1"},
 		{Provider: fp2, Model: "model-b", Label: "candidate-2"},
-	}, requestLogContext{})
+	}, requestLogContext{}, testLogger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -91,7 +95,7 @@ func TestHandleChat_SingleCandidateSuccess(t *testing.T) {
 
 	out, err := handleChatWithCandidates(context.Background(), Request{}, []Candidate{
 		{Provider: fp, Model: "test-model", Label: "test"},
-	}, requestLogContext{})
+	}, requestLogContext{}, testLogger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

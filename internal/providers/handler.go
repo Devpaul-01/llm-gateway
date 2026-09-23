@@ -4,23 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/Devpaul-01/llm-gateway/internal/requestlog"
 )
-
-func HandleChat(ctx context.Context, db *sql.DB, projectID, gatewayKeyID string, encryptionKey []byte, req Request) (<-chan Chunk, error) {
-	candidates, err := resolveCandidates(ctx, db, projectID, encryptionKey, req)
-	if err != nil {
-		return nil, err
-	}
-	return handleChatWithCandidates(ctx, req, candidates, requestLogContext{
-		DB:           db,
-		ProjectID:    projectID,
-		GatewayKeyID: gatewayKeyID,
-	})
-}
 
 type requestLogContext struct {
 	DB           *sql.DB
@@ -28,7 +16,19 @@ type requestLogContext struct {
 	GatewayKeyID string
 }
 
-func handleChatWithCandidates(ctx context.Context, req Request, candidates []Candidate, logCtx requestLogContext) (<-chan Chunk, error) {
+func HandleChat(ctx context.Context, db *sql.DB, projectID, gatewayKeyID string, encryptionKey []byte, req Request, logger *slog.Logger) (<-chan Chunk, error) {
+	candidates, err := resolveCandidates(ctx, db, projectID, encryptionKey, req, logger)
+	if err != nil {
+		return nil, err
+	}
+	return handleChatWithCandidates(ctx, req, candidates, requestLogContext{
+		DB:           db,
+		ProjectID:    projectID,
+		GatewayKeyID: gatewayKeyID,
+	}, logger)
+}
+
+func handleChatWithCandidates(ctx context.Context, req Request, candidates []Candidate, logCtx requestLogContext, logger *slog.Logger) (<-chan Chunk, error) {
 	if len(candidates) == 0 {
 		return nil, &ProviderError{Category: NonRetryable, Cause: errors.New("no candidates available")}
 	}
@@ -43,6 +43,9 @@ func handleChatWithCandidates(ctx context.Context, req Request, candidates []Can
 		var tokensIn, tokensOut *int
 
 		defer func() {
+			if logCtx.DB == nil {
+				return
+			}
 			totalMs := int(time.Since(startTime).Milliseconds())
 			var ttftMs *int
 			if ttft != nil {
@@ -62,7 +65,7 @@ func handleChatWithCandidates(ctx context.Context, req Request, candidates []Can
 				Stream:          true,
 			}
 			if err := requestlog.Insert(context.Background(), logCtx.DB, entry); err != nil {
-				log.Printf("[requestlog] failed to write log entry: %v", err)
+				logger.Error("failed to write request log", "error", err)
 			}
 		}()
 
@@ -73,6 +76,7 @@ func handleChatWithCandidates(ctx context.Context, req Request, candidates []Can
 
 			providerCh, err := candidate.Provider.Chat(ctx, candidateReq)
 			if err != nil {
+				logger.Info("candidate failed pre-stream", "candidate", candidate.Label, "error", err)
 				continue
 			}
 

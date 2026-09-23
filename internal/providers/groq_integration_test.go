@@ -22,7 +22,7 @@ func TestGroqProvider_LiveChatCompletion(t *testing.T) {
 	}
 
 	ch, err := gp.Chat(context.Background(), Request{
-		Model:       "llama-3.3-70b-versatile",
+		Model: "openai/gpt-oss-120b",
 		Messages:    []Message{{Role: "user", Content: "Say the single word: hello"}},
 		MaxTokens:   20,
 		Temperature: 0.0,

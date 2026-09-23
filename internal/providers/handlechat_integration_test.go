@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/hex"
 	"os"
+	"io"
 	"testing"
+	"log/slog"
+
 
 	"github.com/Devpaul-01/llm-gateway/internal/config"
 	"github.com/Devpaul-01/llm-gateway/internal/credentials"
@@ -12,6 +15,8 @@ import (
 	"github.com/joho/godotenv"
 )
 
+
+var newLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 func TestHandleChat_EndToEnd_RealGroq(t *testing.T) {
 	_ = godotenv.Load("../../.env")
 
@@ -54,7 +59,7 @@ func TestHandleChat_EndToEnd_RealGroq(t *testing.T) {
 		Messages:    []Message{{Role: "user", Content: "Say the single word: hello"}},
 		MaxTokens:   500,
 		Temperature: 0.0,
-	})
+	}, newLogger)
 	if err != nil {
 		t.Fatalf("HandleChat returned an error: %v", err)
 	}

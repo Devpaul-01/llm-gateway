@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/Devpaul-01/llm-gateway/internal/applog"
 	"github.com/Devpaul-01/llm-gateway/internal/config"
 	"github.com/Devpaul-01/llm-gateway/internal/db"
 	"github.com/Devpaul-01/llm-gateway/internal/httpserver"
@@ -22,6 +23,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
+
+	logger := applog.New()
 
 	ctx := context.Background()
 
@@ -44,7 +47,7 @@ func main() {
 		log.Fatalf("decoding encryption key: %v", err)
 	}
 
-	mux := httpserver.New(pool, redisClient, encryptionKey, cfg.AdminToken)
+	mux := httpserver.New(pool, redisClient, encryptionKey, cfg.AdminToken, logger)
 	log.Println("starting server on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
 		log.Fatalf("server error: %v", err)

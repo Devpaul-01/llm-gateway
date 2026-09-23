@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -26,7 +27,7 @@ type chatMessageJSON struct {
 	Content string `json:"content"`
 }
 
-func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte) http.HandlerFunc {
+func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectID, ok := ProjectIDFromContext(r.Context())
 		if !ok {
@@ -73,7 +74,7 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte) 
 			MaxTokens:   maxTokens,
 		}
 
-		out, err := providers.HandleChat(r.Context(), db, projectID, gatewayKeyID, encryptionKey, req)
+		out, err := providers.HandleChat(r.Context(), db, projectID, gatewayKeyID, encryptionKey, req, logger)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

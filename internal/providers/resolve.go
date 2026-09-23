@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/Devpaul-01/llm-gateway/internal/credentials"
 )
@@ -18,16 +18,10 @@ var defaultPriority = []modelChoice{
 	{Provider: "groq", Model: "openai/gpt-oss-120b"},
 }
 
-// inferProviderForModel is a temporary, Groq-only mapping. Once more
-// providers are added, this needs a real model->provider lookup table
-// (or the client should be able to name the provider explicitly).
 func inferProviderForModel(model string) string {
 	return "groq"
 }
 
-// newProviderAdapter constructs the right Provider implementation for a
-// given provider name. Only "groq" is implemented so far; this grows
-// into a real switch/registry as more adapters are built.
 func newProviderAdapter(provider, apiKey string) Provider {
 	switch provider {
 	case "groq":
@@ -37,7 +31,7 @@ func newProviderAdapter(provider, apiKey string) Provider {
 	}
 }
 
-func resolveCandidates(ctx context.Context, db *sql.DB, projectID string, encryptionKey []byte, req Request) ([]Candidate, error) {
+func resolveCandidates(ctx context.Context, db *sql.DB, projectID string, encryptionKey []byte, req Request, logger *slog.Logger) ([]Candidate, error) {
 	var choices []modelChoice
 
 	if req.Model != "" {
@@ -45,16 +39,15 @@ func resolveCandidates(ctx context.Context, db *sql.DB, projectID string, encryp
 	} else {
 		choices = defaultPriority
 	}
-	log.Printf("[resolve debug] projectID=%s choices=%+v", projectID, choices)
 
 	var candidates []Candidate
 	for _, choice := range choices {
 		creds, err := credentials.GetByProjectAndProvider(ctx, db, projectID, choice.Provider, encryptionKey)
 		if err != nil {
-			log.Printf("[resolve debug] error fetching credentials for provider=%s: %v", choice.Provider, err)
+			logger.Error("failed to fetch credentials", "provider", choice.Provider, "error", err)
 			return nil, err
 		}
-		log.Printf("[resolve debug] provider=%s found %d credential(s)", choice.Provider, len(creds))
+		logger.Info("resolved credentials", "provider", choice.Provider, "count", len(creds))
 
 		for _, cred := range creds {
 			candidates = append(candidates, Candidate{
