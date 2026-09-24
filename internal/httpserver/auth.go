@@ -10,6 +10,7 @@ import (
 
 	"github.com/Devpaul-01/llm-gateway/internal/concurrency"
 	"github.com/Devpaul-01/llm-gateway/internal/gatewaykeys"
+	"github.com/Devpaul-01/llm-gateway/internal/budget"
 	"github.com/Devpaul-01/llm-gateway/internal/providers"
 	"github.com/redis/go-redis/v9"
 )
@@ -34,6 +35,7 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		
 		gatewayKeyID, ok := GatewayKeyIDFromContext(r.Context())
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -65,6 +67,15 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 		maxTokens := reqBody.MaxTokens
 		if maxTokens <= 0 {
 			maxTokens = 1024
+		}
+		allowed, err := budget.CheckAndReserve(r.Context(), rdb, projectID, maxTokens, 100000)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !allowed {
+			http.Error(w, "daily token budget exceeded for this project", http.StatusTooManyRequests)
+			return
 		}
 
 		req := providers.Request{
