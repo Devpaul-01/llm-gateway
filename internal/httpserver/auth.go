@@ -7,10 +7,14 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/Devpaul-01/llm-gateway/internal/budget"
 	"github.com/Devpaul-01/llm-gateway/internal/concurrency"
 	"github.com/Devpaul-01/llm-gateway/internal/gatewaykeys"
-	"github.com/Devpaul-01/llm-gateway/internal/budget"
+	"github.com/Devpaul-01/llm-gateway/internal/ratelimit"
+
+	"github.com/Devpaul-01/llm-gateway/internal/projectsettings"
 	"github.com/Devpaul-01/llm-gateway/internal/providers"
 	"github.com/redis/go-redis/v9"
 )
@@ -35,19 +39,24 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		
+
 		gatewayKeyID, ok := GatewayKeyIDFromContext(r.Context())
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-
-		allowed, err := concurrency.Acquire(r.Context(), rdb, projectID, 10)
+		settings, err := projectsettings.Resolve(r.Context(), db, projectID)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		if !allowed {
+
+		allowedConcurrent, err := concurrency.Acquire(r.Context(), rdb, projectID, settings.MaxConcurrentStreams)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !allowedConcurrent {
 			http.Error(w, "too many concurrent requests for this project", http.StatusTooManyRequests)
 			return
 		}
@@ -68,16 +77,16 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 		if maxTokens <= 0 {
 			maxTokens = 1024
 		}
-		allowed, err := budget.CheckAndReserve(r.Context(), rdb, projectID, maxTokens, 100000)
+
+		allowedBudget, err := budget.CheckAndReserve(r.Context(), rdb, projectID, maxTokens, settings.TokenBudget)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		if !allowed {
+		if !allowedBudget {
 			http.Error(w, "daily token budget exceeded for this project", http.StatusTooManyRequests)
 			return
 		}
-
 		req := providers.Request{
 			Model:       reqBody.Model,
 			Messages:    messages,
@@ -112,6 +121,22 @@ func RequireGatewayKey(db *sql.DB, rdb *redis.Client, next http.Handler) http.Ha
 		}
 		if key == nil {
 			http.Error(w, "invalid API key", http.StatusUnauthorized)
+			return
+		}
+
+		settings, err := projectsettings.Resolve(r.Context(), db, key.ProjectID)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		allowed, err := ratelimit.AllowRequest(r.Context(), rdb, key.ID, settings.RateLimitPerMin, time.Minute)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !allowed {
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
 

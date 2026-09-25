@@ -3,6 +3,9 @@ package httpserver
 import (
 	"database/sql"
 	"log/slog"
+
+	"github.com/Devpaul-01/llm-gateway/internal/projectsettings"
+
 	"net/http"
 
 	"github.com/redis/go-redis/v9"
@@ -22,6 +25,6 @@ func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte, adminToken string,
 	mux.Handle("POST /admin/projects", RequireAdminToken(adminToken, handleCreateProject(db)))
 	mux.Handle("POST /admin/gateway-keys", RequireAdminToken(adminToken, handleCreateGatewayKey(db)))
 	mux.Handle("POST /admin/credentials", RequireAdminToken(adminToken, handleCreateCredential(db, encryptionKey)))
-
+	mux.Handle("PATCH /admin/projects/{id}", RequireAdminToken(adminToken, projectsettings.HandleUpdateProjectSettings(db)))
 	return mux
 }
