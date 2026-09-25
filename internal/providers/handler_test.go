@@ -10,6 +10,56 @@ import (
 
 var testLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
+func TestHandleChat_ContinuesOnFailureWhenOptedIn(t *testing.T) {
+	fp1 := &FakeProvider{
+		Chunks: []Chunk{
+			{Content: "Hello, "},
+			{Err: &ProviderError{Category: ProviderTransient, Cause: errors.New("connection dropped")}},
+		},
+	}
+	fp2 := &FakeProvider{
+		Chunks: []Chunk{
+			{Content: "world!"},
+			{Done: true},
+		},
+	}
+
+	out, err := handleChatWithCandidates(context.Background(), Request{ContinueOnFailure: true}, []Candidate{
+		{Provider: fp1, Model: "model-a", Label: "candidate-1"},
+		{Provider: fp2, Model: "model-b", Label: "candidate-2"},
+	}, requestLogContext{}, testLogger, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var received []Chunk
+	for chunk := range out {
+		received = append(received, chunk)
+	}
+
+	var fullContent string
+	var lastChunk Chunk
+	for _, c := range received {
+		fullContent += c.Content
+		lastChunk = c
+	}
+
+	if fullContent != "Hello, world!" {
+		t.Errorf("expected combined content %q, got %q", "Hello, world!", fullContent)
+	}
+
+	if !lastChunk.Done {
+		t.Errorf("expected final chunk to be Done")
+	}
+
+	if len(lastChunk.ModelsUsed) != 2 {
+		t.Fatalf("expected ModelsUsed to have 2 entries, got %d: %v", len(lastChunk.ModelsUsed), lastChunk.ModelsUsed)
+	}
+	if lastChunk.ModelsUsed[0] != "candidate-1" || lastChunk.ModelsUsed[1] != "candidate-2" {
+		t.Errorf("expected ModelsUsed [candidate-1 candidate-2], got %v", lastChunk.ModelsUsed)
+	}
+}
+
 func TestHandleChat_StopsOnMidStreamFailure(t *testing.T) {
 	fp := &FakeProvider{
 		Chunks: []Chunk{
@@ -27,7 +77,7 @@ func TestHandleChat_StopsOnMidStreamFailure(t *testing.T) {
 	out, err := handleChatWithCandidates(context.Background(), Request{}, []Candidate{
 		{Provider: fp, Model: "model-a", Label: "candidate-1"},
 		{Provider: fp2, Model: "model-a", Label: "candidate-2"},
-	}, requestLogContext{}, testLogger)
+	}, requestLogContext{}, testLogger, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -61,7 +111,7 @@ func TestHandleChat_FailsOverAfterPreStreamError(t *testing.T) {
 	out, err := handleChatWithCandidates(context.Background(), Request{}, []Candidate{
 		{Provider: fp1, Model: "model-a", Label: "candidate-1"},
 		{Provider: fp2, Model: "model-b", Label: "candidate-2"},
-	}, requestLogContext{}, testLogger)
+	}, requestLogContext{}, testLogger, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,7 +145,7 @@ func TestHandleChat_SingleCandidateSuccess(t *testing.T) {
 
 	out, err := handleChatWithCandidates(context.Background(), Request{}, []Candidate{
 		{Provider: fp, Model: "test-model", Label: "test"},
-	}, requestLogContext{}, testLogger)
+	}, requestLogContext{}, testLogger, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

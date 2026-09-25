@@ -17,15 +17,18 @@ type Usage struct {
 }
 
 type Request struct {
-	Messages    []Message
-	Model       string
-	Temperature float64
-	MaxTokens   int
+	Messages          []Message
+	Model             string
+	Temperature       float64
+	Provider          string
+	MaxTokens         int
+	ContinueOnFailure bool
 }
 
 type Chunk struct {
-	Usage   *Usage
-	Content string
-	Done    bool
-	Err     *ProviderError
+	Usage      *Usage
+	Content    string
+	Done       bool
+	Err        *ProviderError
+	ModelsUsed []string
 }
