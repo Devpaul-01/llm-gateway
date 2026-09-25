@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"log/slog"
 
-	"github.com/Devpaul-01/llm-gateway/internal/projectsettings"
-
 	"net/http"
 
 	"github.com/redis/go-redis/v9"
@@ -21,10 +19,12 @@ func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte, adminToken string,
 
 	chatHandler := handleChatCompletions(db, rdb, encryptionKey, logger)
 	mux.Handle("POST /v1/chat/completions", RequireGatewayKey(db, rdb, chatHandler))
+	mux.Handle("GET /admin/projects", RequireAdminToken(adminToken, handleListProjects(db)))
+	mux.Handle("GET /admin/projects/{id}", RequireAdminToken(adminToken, handleGetProject(db)))
 
 	mux.Handle("POST /admin/projects", RequireAdminToken(adminToken, handleCreateProject(db)))
 	mux.Handle("POST /admin/gateway-keys", RequireAdminToken(adminToken, handleCreateGatewayKey(db)))
 	mux.Handle("POST /admin/credentials", RequireAdminToken(adminToken, handleCreateCredential(db, encryptionKey)))
-	mux.Handle("PATCH /admin/projects/{id}", RequireAdminToken(adminToken, projectsettings.HandleUpdateProjectSettings(db)))
+	mux.Handle("PATCH /admin/projects/{id}", RequireAdminToken(adminToken, handleUpdateProjectSettings(db)))
 	return mux
 }
