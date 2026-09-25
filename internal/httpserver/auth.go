@@ -100,7 +100,11 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 			return
 		}
 
-		streamSSE(w, out)
+		if reqBody.Stream {
+			streamSSE(w, out)
+		} else {
+			writeNonStreamingResponse(w, out)
+		}
 	}
 }
 
