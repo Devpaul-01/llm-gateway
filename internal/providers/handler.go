@@ -9,9 +9,8 @@ import (
 	"time"
 
 	"github.com/Devpaul-01/llm-gateway/internal/cooldown"
-	"github.com/redis/go-redis/v9"
-
 	"github.com/Devpaul-01/llm-gateway/internal/requestlog"
+	"github.com/redis/go-redis/v9"
 )
 
 type requestLogContext struct {
@@ -21,7 +20,7 @@ type requestLogContext struct {
 }
 
 func HandleChat(ctx context.Context, db *sql.DB, projectID, gatewayKeyID string, encryptionKey []byte, req Request, logger *slog.Logger, rdb *redis.Client) (<-chan Chunk, error) {
-	candidates, err := resolveCandidates(ctx, db, projectID, encryptionKey, req, logger)
+	candidates, err := resolveCandidates(ctx, db, projectID, encryptionKey, req, logger, rdb)
 	if err != nil {
 		return nil, err
 	}
@@ -87,13 +86,13 @@ func handleChatWithCandidates(ctx context.Context, req Request, candidates []Can
 		defer close(out)
 
 		activeReq := req
-		modelsUsed := []string{}
+		var modelsUsed []ModelUsage
 
 		for _, candidate := range candidates {
 			candidateReq := activeReq
 			candidateReq.Model = candidate.Model
 
-			providerCh, err := candidate.Provider.Chat(ctx, candidateReq)
+			providerCh, err := candidate.Adapter.Chat(ctx, candidateReq)
 			if err != nil {
 				logger.Info("candidate failed pre-stream", "candidate", candidate.Label, "error", err)
 				if pe, ok := err.(*ProviderError); ok && pe.Category == KeyFault && rdb != nil {
@@ -129,8 +128,8 @@ func handleChatWithCandidates(ctx context.Context, req Request, candidates []Can
 
 				if chunk.Done {
 					finalStatus = "success"
-					modelsUsed = append(modelsUsed, candidate.Label)
-					finalProvider = candidate.Label
+					modelsUsed = append(modelsUsed, ModelUsage{Provider: candidate.ProviderName, Model: candidate.Model})
+					finalProvider = candidate.ProviderName
 					finalModel = candidate.Model
 					if chunk.Usage != nil {
 						tokensIn = &chunk.Usage.PromptTokens
@@ -148,7 +147,7 @@ func handleChatWithCandidates(ctx context.Context, req Request, candidates []Can
 				continue
 			}
 
-			modelsUsed = append(modelsUsed, candidate.Label)
+			modelsUsed = append(modelsUsed, ModelUsage{Provider: candidate.ProviderName, Model: candidate.Model})
 
 			if streamErr != nil && streamErr.Category == KeyFault && rdb != nil {
 				if markErr := cooldown.MarkFailed(context.Background(), rdb, candidate.CredentialID); markErr != nil {
@@ -163,7 +162,7 @@ func handleChatWithCandidates(ctx context.Context, req Request, candidates []Can
 			}
 
 			finalStatus = "partial"
-			finalProvider = candidate.Label
+			finalProvider = candidate.ProviderName
 			finalModel = candidate.Model
 			select {
 			case <-ctx.Done():

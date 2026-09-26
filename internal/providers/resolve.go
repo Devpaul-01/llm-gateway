@@ -8,7 +8,6 @@ import (
 
 	"github.com/Devpaul-01/llm-gateway/internal/cooldown"
 	"github.com/Devpaul-01/llm-gateway/internal/credentials"
-
 	"github.com/redis/go-redis/v9"
 )
 
@@ -19,22 +18,19 @@ type modelChoice struct {
 
 var defaultPriority = []modelChoice{
 	{Provider: "groq", Model: "openai/gpt-oss-120b"},
-
 	{Provider: "mistral", Model: "mistral-large-latest"},
 	{Provider: "openrouter", Model: "meta-llama/llama-3.1-8b-instruct"},
 }
 
-// inferProviderForModel is a temporary, Groq-only mapping. Once more
-// providers are added, this needs a real model->provider lookup table
 var modelToProvider = map[string]string{
 	"openai/gpt-oss-120b":              "groq",
 	"openai/gpt-oss-20b":               "groq",
 	"llama-3.3-70b-versatile":          "groq",
 	"mistral-large-latest":             "mistral",
 	"mistral-medium-latest":            "mistral",
-	"gemini-2.5-flash-lite":            "gemini",
 	"ministral-3b-latest":              "mistral",
 	"meta-llama/llama-3.1-8b-instruct": "openrouter",
+	"gemini-2.5-flash-lite":            "gemini",
 }
 
 func inferProviderForModel(model string) (string, bool) {
@@ -42,24 +38,16 @@ func inferProviderForModel(model string) (string, bool) {
 	return provider, found
 }
 
-// newProviderAdapter constructs the right Provider implementation for a
-// given provider name. Only "groq" is implemented so far; this grows
-// into a real switch/registry as more adapters are built.
 func newProviderAdapter(provider, apiKey string) Provider {
 	switch provider {
-
-	case "gemini":
-		{
-			return &GeminiProvider{APIKey: apiKey, BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai"}
-
-		}
-	case "openrouter":
-		return &OpenRouterProvider{APIKey: apiKey, BaseURL: "https://openrouter.ai/api/v1"}
-
 	case "groq":
 		return &GroqProvider{APIKey: apiKey, BaseURL: "https://api.groq.com/openai/v1"}
 	case "mistral":
 		return &MistralProvider{APIKey: apiKey, BaseURL: "https://api.mistral.ai/v1"}
+	case "openrouter":
+		return &OpenRouterProvider{APIKey: apiKey, BaseURL: "https://openrouter.ai/api/v1"}
+	case "gemini":
+		return &GeminiProvider{APIKey: apiKey, BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai"}
 	default:
 		return nil
 	}
@@ -67,6 +55,7 @@ func newProviderAdapter(provider, apiKey string) Provider {
 
 func resolveCandidates(ctx context.Context, db *sql.DB, projectID string, encryptionKey []byte, req Request, logger *slog.Logger, rdb *redis.Client) ([]Candidate, error) {
 	var choices []modelChoice
+
 	if req.Model != "" {
 		provider := req.Provider
 		if provider == "" {
@@ -102,13 +91,15 @@ func resolveCandidates(ctx context.Context, db *sql.DB, projectID string, encryp
 			}
 
 			candidates = append(candidates, Candidate{
-				Provider:     newProviderAdapter(choice.Provider, cred.APIKey),
+				Adapter:      newProviderAdapter(choice.Provider, cred.APIKey),
+				ProviderName: choice.Provider,
 				Model:        choice.Model,
 				Label:        fmt.Sprintf("%s:%s", choice.Provider, choice.Model),
 				CredentialID: cred.ID,
 			})
 		}
 	}
+
 	if len(candidates) == 0 {
 		return nil, &ProviderError{Category: NonRetryable, Cause: fmt.Errorf("no usable candidates for request")}
 	}

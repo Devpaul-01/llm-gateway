@@ -20,11 +20,13 @@ import (
 )
 
 type chatCompletionRequest struct {
-	Model       string            `json:"model"`
-	Messages    []chatMessageJSON `json:"messages"`
-	Temperature float64           `json:"temperature"`
-	MaxTokens   int               `json:"max_tokens"`
-	Stream      bool              `json:"stream"`
+	Model             string            `json:"model"`
+	Messages          []chatMessageJSON `json:"messages"`
+	Temperature       float64           `json:"temperature"`
+	MaxTokens         int               `json:"max_tokens"`
+	Provider          string            `json:"provider"`
+	Stream            bool              `json:"stream"`
+	ContinueOnFailure bool              `json:"continue_on_failure"`
 }
 
 type chatMessageJSON struct {
@@ -88,13 +90,15 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 			return
 		}
 		req := providers.Request{
-			Model:       reqBody.Model,
-			Messages:    messages,
-			Temperature: reqBody.Temperature,
-			MaxTokens:   maxTokens,
+			Model:             reqBody.Model,
+			Messages:          messages,
+			Temperature:       reqBody.Temperature,
+			Provider:          reqBody.Provider,
+			ContinueOnFailure: reqBody.ContinueOnFailure,
+			MaxTokens:         maxTokens,
 		}
 
-		out, err := providers.HandleChat(r.Context(), db, projectID, gatewayKeyID, encryptionKey, req, logger)
+		out, err := providers.HandleChat(r.Context(), db, projectID, gatewayKeyID, encryptionKey, req, logger, rdb)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

@@ -1,8 +1,14 @@
 package providers
 
 type Candidate struct {
-	Provider     Provider
+	Adapter      Provider
+	ProviderName string
 	Model        string
+	Label        string
 	CredentialID string
-	Label        string // human-readable, e.g. "groq:llama-4-scout" — for logging/debugging
+}
+
+type ModelUsage struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
 }

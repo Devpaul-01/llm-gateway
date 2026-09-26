@@ -26,9 +26,9 @@ type Request struct {
 }
 
 type Chunk struct {
-	Usage      *Usage
 	Content    string
 	Done       bool
+	Usage      *Usage
 	Err        *ProviderError
-	ModelsUsed []string
+	ModelsUsed []ModelUsage
 }
