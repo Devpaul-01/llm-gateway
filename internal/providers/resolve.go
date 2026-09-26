@@ -19,6 +19,7 @@ type modelChoice struct {
 
 var defaultPriority = []modelChoice{
 	{Provider: "groq", Model: "openai/gpt-oss-120b"},
+
 	{Provider: "mistral", Model: "mistral-large-latest"},
 	{Provider: "openrouter", Model: "meta-llama/llama-3.1-8b-instruct"},
 }
@@ -31,6 +32,7 @@ var modelToProvider = map[string]string{
 	"llama-3.3-70b-versatile":          "groq",
 	"mistral-large-latest":             "mistral",
 	"mistral-medium-latest":            "mistral",
+	"gemini-2.5-flash-lite":            "gemini",
 	"ministral-3b-latest":              "mistral",
 	"meta-llama/llama-3.1-8b-instruct": "openrouter",
 }
@@ -45,6 +47,12 @@ func inferProviderForModel(model string) (string, bool) {
 // into a real switch/registry as more adapters are built.
 func newProviderAdapter(provider, apiKey string) Provider {
 	switch provider {
+
+	case "gemini":
+		{
+			return &GeminiProvider{APIKey: apiKey, BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai"}
+
+		}
 	case "openrouter":
 		return &OpenRouterProvider{APIKey: apiKey, BaseURL: "https://openrouter.ai/api/v1"}
 
