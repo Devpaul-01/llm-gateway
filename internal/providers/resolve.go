@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/Devpaul-01/llm-gateway/internal/credentials"
 	"github.com/Devpaul-01/llm-gateway/internal/cooldown"
+	"github.com/Devpaul-01/llm-gateway/internal/credentials"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -20,18 +20,19 @@ type modelChoice struct {
 var defaultPriority = []modelChoice{
 	{Provider: "groq", Model: "openai/gpt-oss-120b"},
 	{Provider: "mistral", Model: "mistral-large-latest"},
+	{Provider: "openrouter", Model: "meta-llama/llama-3.1-8b-instruct"},
 }
 
 // inferProviderForModel is a temporary, Groq-only mapping. Once more
 // providers are added, this needs a real model->provider lookup table
-// (or the client should be able to name the provider explicitly).
 var modelToProvider = map[string]string{
-	"openai/gpt-oss-120b":     "groq",
-	"openai/gpt-oss-20b":      "groq",
-	"llama-3.3-70b-versatile": "groq",
-	"mistral-large-latest":    "mistral",
-	"mistral-medium-latest":   "mistral",
-	"ministral-3b-latest":     "mistral",
+	"openai/gpt-oss-120b":              "groq",
+	"openai/gpt-oss-20b":               "groq",
+	"llama-3.3-70b-versatile":          "groq",
+	"mistral-large-latest":             "mistral",
+	"mistral-medium-latest":            "mistral",
+	"ministral-3b-latest":              "mistral",
+	"meta-llama/llama-3.1-8b-instruct": "openrouter",
 }
 
 func inferProviderForModel(model string) (string, bool) {
@@ -44,6 +45,9 @@ func inferProviderForModel(model string) (string, bool) {
 // into a real switch/registry as more adapters are built.
 func newProviderAdapter(provider, apiKey string) Provider {
 	switch provider {
+	case "openrouter":
+		return &OpenRouterProvider{APIKey: apiKey, BaseURL: "https://openrouter.ai/api/v1"}
+
 	case "groq":
 		return &GroqProvider{APIKey: apiKey, BaseURL: "https://api.groq.com/openai/v1"}
 	case "mistral":
