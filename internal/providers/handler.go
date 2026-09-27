@@ -95,10 +95,25 @@ func handleChatWithCandidates(ctx context.Context, req Request, candidates []Can
 			providerCh, err := candidate.Adapter.Chat(ctx, candidateReq)
 			if err != nil {
 				logger.Info("candidate failed pre-stream", "candidate", candidate.Label, "error", err)
-				if pe, ok := err.(*ProviderError); ok && pe.Category == KeyFault && rdb != nil {
-					if markErr := cooldown.MarkFailed(context.Background(), rdb, candidate.CredentialID); markErr != nil {
-						logger.Error("failed to mark credential as cooling", "error", markErr)
+
+				if pe, ok := err.(*ProviderError); ok {
+					switch pe.Category {
+					case KeyFault:
+						if rdb != nil {
+							if markErr := cooldown.MarkFailed(context.Background(), rdb, candidate.CredentialID); markErr != nil {
+								logger.Error("failed to mark credential as cooling", "error", markErr)
+							}
+						}
+					case NonRetryable:
+						logger.Error("non-retryable failure, aborting fallback chain", "candidate", candidate.Label, "error", err)
+						select {
+						case <-ctx.Done():
+						case out <- Chunk{Err: pe}:
+						}
+						return
 					}
+					// ProviderTransient, BadModel: no action beyond logging above;
+					// fall through to the next candidate either way.
 				}
 				continue
 			}
@@ -142,16 +157,30 @@ func handleChatWithCandidates(ctx context.Context, req Request, candidates []Can
 					return
 				}
 			}
-
 			if !streamFailed {
 				continue
 			}
 
 			modelsUsed = append(modelsUsed, ModelUsage{Provider: candidate.ProviderName, Model: candidate.Model})
 
-			if streamErr != nil && streamErr.Category == KeyFault && rdb != nil {
-				if markErr := cooldown.MarkFailed(context.Background(), rdb, candidate.CredentialID); markErr != nil {
-					logger.Error("failed to mark credential as cooling", "error", markErr)
+			if streamErr != nil {
+				switch streamErr.Category {
+				case KeyFault:
+					if rdb != nil {
+						if markErr := cooldown.MarkFailed(context.Background(), rdb, candidate.CredentialID); markErr != nil {
+							logger.Error("failed to mark credential as cooling", "error", markErr)
+						}
+					}
+				case NonRetryable:
+					logger.Error("non-retryable mid-stream failure, aborting", "candidate", candidate.Label, "error", streamErr)
+					finalStatus = "partial"
+					finalProvider = candidate.ProviderName
+					finalModel = candidate.Model
+					select {
+					case <-ctx.Done():
+					case out <- Chunk{Err: streamErr}:
+					}
+					return
 				}
 			}
 

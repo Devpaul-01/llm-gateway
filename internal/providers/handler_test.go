@@ -10,6 +10,44 @@ import (
 
 var testLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
+func TestHandleChat_AbortsImmediatelyOnNonRetryable(t *testing.T) {
+	fp1 := &FakeProvider{
+		Err: &ProviderError{Category: NonRetryable, Cause: errors.New("malformed request")},
+	}
+	fp2 := &FakeProvider{
+		Chunks: []Chunk{
+			{Content: "should never be reached"},
+			{Done: true},
+		},
+	}
+
+	out, err := handleChatWithCandidates(context.Background(), Request{}, []Candidate{
+		{Adapter: fp1, ProviderName: "groq", Model: "model-a", Label: "candidate-1"},
+		{Adapter: fp2, ProviderName: "mistral", Model: "model-b", Label: "candidate-2"},
+	}, requestLogContext{}, testLogger, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var received []Chunk
+	for chunk := range out {
+		if chunk.Content == "should never be reached" {
+			t.Fatalf("fp2 should never have been tried after a NonRetryable failure on fp1")
+		}
+		received = append(received, chunk)
+	}
+
+	if len(received) != 1 {
+		t.Fatalf("expected exactly 1 chunk (the error), got %d", len(received))
+	}
+	if received[0].Err == nil {
+		t.Fatalf("expected the received chunk to carry an error")
+	}
+	if received[0].Err.Category != NonRetryable {
+		t.Errorf("expected error category NonRetryable, got %v", received[0].Err.Category)
+	}
+}
+
 func TestHandleChat_SingleCandidateSuccess(t *testing.T) {
 	fp := &FakeProvider{
 		Chunks: []Chunk{
@@ -161,5 +199,46 @@ func TestHandleChat_ContinuesOnFailureWhenOptedIn(t *testing.T) {
 	}
 	if lastChunk.ModelsUsed[0].Provider != "groq" || lastChunk.ModelsUsed[1].Provider != "mistral" {
 		t.Errorf("expected ModelsUsed providers [groq mistral], got %v", lastChunk.ModelsUsed)
+	}
+}
+
+func TestHandleChat_ContinuationThenPreStreamFailureFallsThrough(t *testing.T) {
+	fp1 := &FakeProvider{
+		Chunks: []Chunk{
+			{Content: "Partial. "},
+			{Err: &ProviderError{Category: ProviderTransient, Cause: errors.New("dropped")}},
+		},
+	}
+	fp2 := &FakeProvider{
+		Err: errors.New("fp2 connection refused"),
+	}
+	fp3 := &FakeProvider{
+		Chunks: []Chunk{
+			{Content: "Recovered."},
+			{Done: true},
+		},
+	}
+
+	out, err := handleChatWithCandidates(context.Background(), Request{ContinueOnFailure: true}, []Candidate{
+		{Adapter: fp1, ProviderName: "groq", Model: "model-a", Label: "candidate-1"},
+		{Adapter: fp2, ProviderName: "mistral", Model: "model-b", Label: "candidate-2"},
+		{Adapter: fp3, ProviderName: "openrouter", Model: "model-c", Label: "candidate-3"},
+	}, requestLogContext{}, testLogger, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var fullContent string
+	var lastChunk Chunk
+	for chunk := range out {
+		fullContent += chunk.Content
+		lastChunk = chunk
+	}
+
+	if fullContent != "Partial. Recovered." {
+		t.Errorf("expected combined content %q, got %q", "Partial. Recovered.", fullContent)
+	}
+	if !lastChunk.Done {
+		t.Errorf("expected final chunk to be Done")
 	}
 }
