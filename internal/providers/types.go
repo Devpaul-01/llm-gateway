@@ -22,6 +22,7 @@ type Request struct {
 	Temperature       float64
 	Provider          string
 	MaxTokens         int
+	FallbackModels    []string
 	ContinueOnFailure bool
 }
 

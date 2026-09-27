@@ -25,6 +25,7 @@ type chatCompletionRequest struct {
 	Temperature       float64           `json:"temperature"`
 	MaxTokens         int               `json:"max_tokens"`
 	Provider          string            `json:"provider"`
+	FallbackModels    []string          `json:"fallback_models"`
 	Stream            bool              `json:"stream"`
 	ContinueOnFailure bool              `json:"continue_on_failure"`
 }
@@ -91,6 +92,7 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 		}
 		req := providers.Request{
 			Model:             reqBody.Model,
+			FallbackModels:    reqBody.FallbackModels,
 			Messages:          messages,
 			Temperature:       reqBody.Temperature,
 			Provider:          reqBody.Provider,

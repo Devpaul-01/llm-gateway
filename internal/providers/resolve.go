@@ -66,10 +66,18 @@ func resolveCandidates(ctx context.Context, db *sql.DB, projectID string, encryp
 			provider = inferred
 		}
 		choices = []modelChoice{{Provider: provider, Model: req.Model}}
+
+		for _, fallbackModel := range req.FallbackModels {
+			fbProvider, found := inferProviderForModel(fallbackModel)
+			if !found {
+				logger.Info("skipping unknown fallback model", "model", fallbackModel)
+				continue
+			}
+			choices = append(choices, modelChoice{Provider: fbProvider, Model: fallbackModel})
+		}
 	} else {
 		choices = defaultPriority
 	}
-
 	var candidates []Candidate
 	for _, choice := range choices {
 		creds, err := credentials.GetByProjectAndProvider(ctx, db, projectID, choice.Provider, encryptionKey)

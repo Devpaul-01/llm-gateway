@@ -13,6 +13,58 @@ import (
 	"github.com/joho/godotenv"
 )
 
+func TestResolveCandidates_ExpandsFallbackModels(t *testing.T) {
+	_ = godotenv.Load("../../.env")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+
+	ctx := context.Background()
+	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		t.Fatalf("connecting to database: %v", err)
+	}
+	defer pool.Close()
+
+	encryptionKey, err := hex.DecodeString(cfg.EncryptionKey)
+	if err != nil {
+		t.Fatalf("decoding encryption key: %v", err)
+	}
+
+	var projectID string
+	err = pool.QueryRowContext(ctx, `INSERT INTO projects (name) VALUES ($1) RETURNING id`, "test-fallback-models").Scan(&projectID)
+	if err != nil {
+		t.Fatalf("creating project: %v", err)
+	}
+	defer pool.ExecContext(ctx, `DELETE FROM projects WHERE id = $1`, projectID)
+
+	if err := credentials.Insert(ctx, pool, projectID, "groq", "fb-test", "fake-groq-key", encryptionKey); err != nil {
+		t.Fatalf("inserting groq credential: %v", err)
+	}
+	if err := credentials.Insert(ctx, pool, projectID, "mistral", "fb-test", "fake-mistral-key", encryptionKey); err != nil {
+		t.Fatalf("inserting mistral credential: %v", err)
+	}
+
+	candidates, err := resolveCandidates(ctx, pool, projectID, encryptionKey, Request{
+		Model:          "openai/gpt-oss-120b",
+		FallbackModels: []string{"mistral-large-latest"},
+	}, testLogger, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(candidates) != 2 {
+		t.Fatalf("expected 2 candidates (primary + fallback), got %d", len(candidates))
+	}
+	if candidates[0].Model != "openai/gpt-oss-120b" || candidates[0].ProviderName != "groq" {
+		t.Errorf("expected first candidate to be groq/openai/gpt-oss-120b, got %s/%s", candidates[0].ProviderName, candidates[0].Model)
+	}
+	if candidates[1].Model != "mistral-large-latest" || candidates[1].ProviderName != "mistral" {
+		t.Errorf("expected second candidate to be mistral/mistral-large-latest, got %s/%s", candidates[1].ProviderName, candidates[1].Model)
+	}
+}
 func TestResolveCandidates_SkipsCoolingCredential(t *testing.T) {
 	_ = godotenv.Load("../../.env")
 
