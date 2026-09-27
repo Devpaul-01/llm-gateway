@@ -8,6 +8,7 @@ import (
 
 	"github.com/Devpaul-01/llm-gateway/internal/cooldown"
 	"github.com/Devpaul-01/llm-gateway/internal/credentials"
+	"github.com/Devpaul-01/llm-gateway/internal/discovery"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -31,6 +32,21 @@ var modelToProvider = map[string]string{
 	"ministral-3b-latest":              "mistral",
 	"meta-llama/llama-3.1-8b-instruct": "openrouter",
 	"gemini-2.5-flash-lite":            "gemini",
+}
+
+func providerBaseURL(provider string) string {
+	switch provider {
+	case "groq":
+		return "https://api.groq.com/openai/v1"
+	case "mistral":
+		return "https://api.mistral.ai/v1"
+	case "openrouter":
+		return "https://openrouter.ai/api/v1"
+	case "gemini":
+		return "https://generativelanguage.googleapis.com/v1beta/openai"
+	default:
+		return ""
+	}
 }
 
 func inferProviderForModel(model string) (string, bool) {
@@ -78,6 +94,7 @@ func resolveCandidates(ctx context.Context, db *sql.DB, projectID string, encryp
 	} else {
 		choices = defaultPriority
 	}
+
 	var candidates []Candidate
 	for _, choice := range choices {
 		creds, err := credentials.GetByProjectAndProvider(ctx, db, projectID, choice.Provider, encryptionKey)
@@ -95,6 +112,20 @@ func resolveCandidates(ctx context.Context, db *sql.DB, projectID string, encryp
 				} else if cooling {
 					logger.Info("skipping cooling credential", "credential", cred.ID, "provider", choice.Provider)
 					continue
+				}
+
+				liveModels := discovery.GetModels(ctx, rdb, choice.Provider, providerBaseURL(choice.Provider), cred.APIKey, nil)
+				if len(liveModels) > 0 {
+					found := false
+					for _, m := range liveModels {
+						if m == choice.Model {
+							found = true
+							break
+						}
+					}
+					if !found {
+						logger.Info("configured model not found in live discovery list, may be deprecated", "provider", choice.Provider, "model", choice.Model)
+					}
 				}
 			}
 
