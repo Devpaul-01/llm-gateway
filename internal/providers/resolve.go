@@ -32,6 +32,34 @@ var modelToProvider = map[string]string{
 	"meta-llama/llama-3.1-8b-instruct": "openrouter",
 	"gemini-2.5-flash-lite":            "gemini",
 }
+var visionCapableModels = map[string]bool{
+	"meta-llama/llama-4-scout-17b-16e-instruct": true,
+	"gemini-2.5-flash-lite":                     true,
+	"mistral-large-latest":                      true,
+}
+
+func isVisionCapable(model string) bool {
+	return visionCapableModels[model]
+}
+func requestHasImages(req Request) bool {
+	for _, m := range req.Messages {
+		if len(m.Images) > 0 {
+			return true
+		}
+	}
+	return false
+}
+func filterVisionCapable(candidates []Candidate, logger *slog.Logger) []Candidate {
+	filtered := make([]Candidate, 0, len(candidates))
+	for _, c := range candidates {
+		if isVisionCapable(c.Model) {
+			filtered = append(filtered, c)
+		} else {
+			logger.Info("skipping non-vision candidate for request with images", "candidate", c.Label)
+		}
+	}
+	return filtered
+}
 
 func inferProviderForModel(model string) (string, bool) {
 	provider, found := modelToProvider[model]
@@ -110,6 +138,14 @@ func resolveCandidates(ctx context.Context, db *sql.DB, projectID string, encryp
 
 	if len(candidates) == 0 {
 		return nil, &ProviderError{Category: NonRetryable, Cause: fmt.Errorf("no usable candidates for request")}
+
+	}
+
+	if requestHasImages(req) {
+		candidates = filterVisionCapable(candidates, logger)
+		if len(candidates) == 0 {
+			return nil, &ProviderError{Category: NonRetryable, Cause: fmt.Errorf("request contains images but no vision-capable model is available for this project")}
+		}
 	}
 
 	return candidates, nil

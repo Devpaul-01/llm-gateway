@@ -29,11 +29,6 @@ type MistralProvider struct {
 	BaseURL string
 }
 
-type mistralMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
 func (g *MistralProvider) Chat(ctx context.Context, req Request) (<-chan Chunk, error) {
 	body, err := buildRequestBody(req, true)
 	if err != nil {

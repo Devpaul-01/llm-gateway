@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -31,8 +32,39 @@ type chatCompletionRequest struct {
 }
 
 type chatMessageJSON struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+}
+
+type contentPartJSON struct {
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	ImageURL struct {
+		URL string `json:"url"`
+	} `json:"image_url"`
+}
+
+func parseMessage(m chatMessageJSON) (providers.Message, error) {
+	var text string
+	if err := json.Unmarshal(m.Content, &text); err == nil {
+		return providers.Message{Role: m.Role, Content: text}, nil
+	}
+
+	var parts []contentPartJSON
+	if err := json.Unmarshal(m.Content, &parts); err != nil {
+		return providers.Message{}, fmt.Errorf("content must be a string or an array of parts")
+	}
+
+	msg := providers.Message{Role: m.Role}
+	for _, p := range parts {
+		switch p.Type {
+		case "text":
+			msg.Content += p.Text
+		case "image_url":
+			msg.Images = append(msg.Images, providers.Image{URL: p.ImageURL.URL})
+		}
+	}
+	return msg, nil
 }
 
 func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, logger *slog.Logger) http.HandlerFunc {
@@ -66,7 +98,7 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 			return
 		}
 		defer concurrency.Release(context.Background(), rdb, projectID)
-
+		r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 		var reqBody chatCompletionRequest
 		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -75,7 +107,12 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 
 		messages := make([]providers.Message, len(reqBody.Messages))
 		for i, m := range reqBody.Messages {
-			messages[i] = providers.Message{Role: m.Role, Content: m.Content}
+			parsed, err := parseMessage(m)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			messages[i] = parsed
 		}
 
 		maxTokens := reqBody.MaxTokens

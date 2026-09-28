@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/hex"
+	"strings"
 	"testing"
 
 	"github.com/Devpaul-01/llm-gateway/internal/config"
@@ -12,6 +13,68 @@ import (
 	"github.com/Devpaul-01/llm-gateway/internal/redisclient"
 	"github.com/joho/godotenv"
 )
+
+func TestFilterVisionCapable_KeepsOnlyVisionModels(t *testing.T) {
+	candidates := []Candidate{
+		{Model: "openai/gpt-oss-120b", Label: "groq:text-only"},
+		{Model: "gemini-2.5-flash-lite", Label: "gemini:vision"},
+		{Model: "mistral-large-latest", Label: "mistral:vision"},
+	}
+
+	got := filterVisionCapable(candidates, testLogger)
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 vision-capable candidates, got %d", len(got))
+	}
+	for _, c := range got {
+		if c.Label == "groq:text-only" {
+			t.Errorf("text-only candidate should have been filtered out")
+		}
+	}
+}
+
+func TestFilterVisionCapable_DoesNotMutateInput(t *testing.T) {
+	candidates := []Candidate{
+		{Model: "openai/gpt-oss-120b", Label: "a"},
+		{Model: "gemini-2.5-flash-lite", Label: "b"},
+	}
+
+	_ = filterVisionCapable(candidates, testLogger)
+
+	if candidates[0].Label != "a" || candidates[1].Label != "b" {
+		t.Errorf("filter mutated its input slice: %+v", candidates)
+	}
+}
+
+func TestBuildRequestBody_SendsImagesAsContentParts(t *testing.T) {
+	body, err := buildRequestBody(Request{
+		Model: "m",
+		Messages: []Message{
+			{Role: "user", Content: "what is this?", Images: []Image{{URL: "data:image/png;base64,AAA"}}},
+		},
+	}, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(body, `"type":"image_url"`) || !strings.Contains(body, "data:image/png;base64,AAA") {
+		t.Errorf("expected image part in request body, got %s", body)
+	}
+}
+
+func TestBuildRequestBody_PlainTextStaysAString(t *testing.T) {
+	body, err := buildRequestBody(Request{
+		Model:    "m",
+		Messages: []Message{{Role: "user", Content: "hello"}},
+	}, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(body, `"content":"hello"`) {
+		t.Errorf("expected plain string content for text-only message, got %s", body)
+	}
+}
 
 func TestResolveCandidates_ExpandsFallbackModels(t *testing.T) {
 	_ = godotenv.Load("../../.env")

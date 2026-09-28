@@ -37,14 +37,25 @@ type GroqProvider struct {
 }
 
 type groqMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"`
 }
 
 func buildRequestBody(req Request, stream bool) (string, error) {
 	messages := make([]groqMessage, len(req.Messages))
 	for i, m := range req.Messages {
-		messages[i] = groqMessage{Role: m.Role, Content: m.Content}
+		if len(m.Images) == 0 {
+			messages[i] = groqMessage{Role: m.Role, Content: m.Content}
+			continue
+		}
+		parts := []map[string]interface{}{{"type": "text", "text": m.Content}}
+		for _, img := range m.Images {
+			parts = append(parts, map[string]interface{}{
+				"type":      "image_url",
+				"image_url": map[string]string{"url": img.URL},
+			})
+		}
+		messages[i] = groqMessage{Role: m.Role, Content: parts}
 	}
 
 	body := groqRequestBody{
