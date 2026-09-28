@@ -21,13 +21,13 @@ import (
 
 type chatCompletionRequest struct {
 	Model             string            `json:"model"`
+	Provider          string            `json:"provider"`
 	Messages          []chatMessageJSON `json:"messages"`
 	Temperature       float64           `json:"temperature"`
 	MaxTokens         int               `json:"max_tokens"`
-	Provider          string            `json:"provider"`
-	FallbackModels    []string          `json:"fallback_models"`
 	Stream            bool              `json:"stream"`
 	ContinueOnFailure bool              `json:"continue_on_failure"`
+	FallbackModels    []string          `json:"fallback_models"`
 }
 
 type chatMessageJSON struct {
@@ -42,20 +42,22 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-
 		gatewayKeyID, ok := GatewayKeyIDFromContext(r.Context())
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+
 		settings, err := projectsettings.Resolve(r.Context(), db, projectID)
 		if err != nil {
+			logger.Error("failed to resolve project settings", "project", projectID, "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 
 		allowedConcurrent, err := concurrency.Acquire(r.Context(), rdb, projectID, settings.MaxConcurrentStreams)
 		if err != nil {
+			logger.Error("concurrency check failed", "project", projectID, "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -83,6 +85,7 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 
 		allowedBudget, err := budget.CheckAndReserve(r.Context(), rdb, projectID, maxTokens, settings.TokenBudget)
 		if err != nil {
+			logger.Error("budget check failed", "project", projectID, "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -90,18 +93,20 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 			http.Error(w, "daily token budget exceeded for this project", http.StatusTooManyRequests)
 			return
 		}
+
 		req := providers.Request{
 			Model:             reqBody.Model,
-			FallbackModels:    reqBody.FallbackModels,
+			Provider:          reqBody.Provider,
 			Messages:          messages,
 			Temperature:       reqBody.Temperature,
-			Provider:          reqBody.Provider,
-			ContinueOnFailure: reqBody.ContinueOnFailure,
 			MaxTokens:         maxTokens,
+			ContinueOnFailure: reqBody.ContinueOnFailure,
+			FallbackModels:    reqBody.FallbackModels,
 		}
 
 		out, err := providers.HandleChat(r.Context(), db, projectID, gatewayKeyID, encryptionKey, req, logger, rdb)
 		if err != nil {
+			logger.Error("chat handling failed", "project", projectID, "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -114,7 +119,7 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 	}
 }
 
-func RequireGatewayKey(db *sql.DB, rdb *redis.Client, next http.Handler) http.Handler {
+func RequireGatewayKey(db *sql.DB, rdb *redis.Client, logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		const prefix = "Bearer "
@@ -126,6 +131,7 @@ func RequireGatewayKey(db *sql.DB, rdb *redis.Client, next http.Handler) http.Ha
 
 		key, err := gatewaykeys.LookupByPlaintext(r.Context(), db, plaintext)
 		if err != nil {
+			logger.Error("gateway key lookup failed", "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -136,12 +142,14 @@ func RequireGatewayKey(db *sql.DB, rdb *redis.Client, next http.Handler) http.Ha
 
 		settings, err := projectsettings.Resolve(r.Context(), db, key.ProjectID)
 		if err != nil {
+			logger.Error("failed to resolve project settings", "project", key.ProjectID, "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 
 		allowed, err := ratelimit.AllowRequest(r.Context(), rdb, key.ID, settings.RateLimitPerMin, time.Minute)
 		if err != nil {
+			logger.Error("rate limit check failed", "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}

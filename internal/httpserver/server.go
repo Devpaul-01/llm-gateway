@@ -18,7 +18,7 @@ func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte, adminToken string,
 	})
 
 	chatHandler := handleChatCompletions(db, rdb, encryptionKey, logger)
-	mux.Handle("POST /v1/chat/completions", RequireGatewayKey(db, rdb, chatHandler))
+	mux.Handle("POST /v1/chat/completions", RequireGatewayKey(db, rdb, logger, chatHandler))
 	mux.Handle("GET /admin/projects", RequireAdminToken(adminToken, handleListProjects(db)))
 	mux.Handle("GET /admin/projects/{id}", RequireAdminToken(adminToken, handleGetProject(db)))
 
