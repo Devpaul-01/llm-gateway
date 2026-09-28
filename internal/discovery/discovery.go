@@ -19,6 +19,49 @@ type modelListResponse struct {
 	} `json:"data"`
 }
 
+func EvictModel(ctx context.Context, rdb *redis.Client, provider, model string) {
+	cacheKey := fmt.Sprintf("discovery:%s", provider)
+
+	cached, err := rdb.Get(ctx, cacheKey).Result()
+	if err != nil {
+		return
+	}
+
+	var models []string
+	if err := json.Unmarshal([]byte(cached), &models); err != nil {
+		return
+	}
+
+	updated := make([]string, 0, len(models))
+	for _, m := range models {
+		if m != model {
+			updated = append(updated, m)
+		}
+	}
+	if len(updated) == len(models) {
+		return
+	}
+
+	data, err := json.Marshal(updated)
+	if err != nil {
+		return
+	}
+
+	ttl, err := rdb.TTL(ctx, cacheKey).Result()
+	if err != nil || ttl <= 0 {
+		ttl = cacheTTL
+	}
+	rdb.Set(ctx, cacheKey, data, ttl)
+}
+
+func RecordProviderTransient(ctx context.Context, rdb *redis.Client, provider string) {
+	key := fmt.Sprintf("providerhealth:%s", provider)
+	pipe := rdb.Pipeline()
+	pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, time.Hour)
+	pipe.Exec(ctx)
+}
+
 func fetchModelsFromProvider(ctx context.Context, baseURL, apiKey string) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/models", nil)
 	if err != nil {

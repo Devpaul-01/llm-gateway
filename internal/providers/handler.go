@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/Devpaul-01/llm-gateway/internal/cooldown"
+	"github.com/Devpaul-01/llm-gateway/internal/discovery"
+
 	"github.com/Devpaul-01/llm-gateway/internal/requestlog"
 	"github.com/redis/go-redis/v9"
 )
@@ -98,6 +100,14 @@ func handleChatWithCandidates(ctx context.Context, req Request, candidates []Can
 
 				if pe, ok := err.(*ProviderError); ok {
 					switch pe.Category {
+					case BadModel:
+						if rdb != nil {
+							discovery.EvictModel(context.Background(), rdb, candidate.ProviderName, candidate.Model)
+						}
+					case ProviderTransient:
+						if rdb != nil {
+							discovery.RecordProviderTransient(context.Background(), rdb, candidate.ProviderName)
+						}
 					case KeyFault:
 						if rdb != nil {
 							if markErr := cooldown.MarkFailed(context.Background(), rdb, candidate.CredentialID); markErr != nil {
@@ -170,6 +180,14 @@ func handleChatWithCandidates(ctx context.Context, req Request, candidates []Can
 						if markErr := cooldown.MarkFailed(context.Background(), rdb, candidate.CredentialID); markErr != nil {
 							logger.Error("failed to mark credential as cooling", "error", markErr)
 						}
+					}
+				case BadModel:
+					if rdb != nil {
+						discovery.EvictModel(context.Background(), rdb, candidate.ProviderName, candidate.Model)
+					}
+				case ProviderTransient:
+					if rdb != nil {
+						discovery.RecordProviderTransient(context.Background(), rdb, candidate.ProviderName)
 					}
 				case NonRetryable:
 					logger.Error("non-retryable mid-stream failure, aborting", "candidate", candidate.Label, "error", streamErr)
