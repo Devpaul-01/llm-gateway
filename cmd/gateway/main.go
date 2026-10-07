@@ -10,6 +10,7 @@ import (
 	"github.com/Devpaul-01/llm-gateway/internal/config"
 	"github.com/Devpaul-01/llm-gateway/internal/db"
 	"github.com/Devpaul-01/llm-gateway/internal/httpserver"
+	"github.com/Devpaul-01/llm-gateway/internal/projectsettings"
 	"github.com/Devpaul-01/llm-gateway/internal/redisclient"
 	"github.com/joho/godotenv"
 )
@@ -47,7 +48,13 @@ func main() {
 		log.Fatalf("decoding encryption key: %v", err)
 	}
 
-	mux := httpserver.New(pool, redisClient, encryptionKey, cfg.AdminToken, logger)
+	defaults := projectsettings.Defaults{
+		RateLimitPerMin:      cfg.DefaultRateLimitPerMin,
+		MaxConcurrentStreams: cfg.DefaultMaxConcurrentStreams,
+		TokenBudget:          cfg.DefaultTokenBudget,
+	}
+
+	mux := httpserver.New(pool, redisClient, encryptionKey, cfg.AdminToken, logger, defaults)
 	log.Println("starting server on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
 		log.Fatalf("server error: %v", err)

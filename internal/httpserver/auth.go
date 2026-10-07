@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -13,12 +13,69 @@ import (
 	"github.com/Devpaul-01/llm-gateway/internal/budget"
 	"github.com/Devpaul-01/llm-gateway/internal/concurrency"
 	"github.com/Devpaul-01/llm-gateway/internal/gatewaykeys"
-	"github.com/Devpaul-01/llm-gateway/internal/ratelimit"
-
 	"github.com/Devpaul-01/llm-gateway/internal/projectsettings"
 	"github.com/Devpaul-01/llm-gateway/internal/providers"
+	"github.com/Devpaul-01/llm-gateway/internal/ratelimit"
 	"github.com/redis/go-redis/v9"
 )
+
+type projectIDContextKey struct{}
+type gatewayKeyIDContextKey struct{}
+
+func ProjectIDFromContext(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(projectIDContextKey{}).(string)
+	return id, ok
+}
+
+func GatewayKeyIDFromContext(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(gatewayKeyIDContextKey{}).(string)
+	return id, ok
+}
+
+func RequireGatewayKey(db *sql.DB, rdb *redis.Client, logger *slog.Logger, defaults projectsettings.Defaults, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		const prefix = "Bearer "
+		if !strings.HasPrefix(authHeader, prefix) {
+			http.Error(w, "missing or malformed Authorization header", http.StatusUnauthorized)
+			return
+		}
+		plaintext := strings.TrimPrefix(authHeader, prefix)
+
+		key, err := gatewaykeys.LookupByPlaintext(r.Context(), db, plaintext)
+		if err != nil {
+			logger.Error("gateway key lookup failed", "error", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if key == nil {
+			http.Error(w, "invalid API key", http.StatusUnauthorized)
+			return
+		}
+
+		settings, err := projectsettings.Resolve(r.Context(), db, key.ProjectID, defaults)
+		if err != nil {
+			logger.Error("failed to resolve project settings", "project", key.ProjectID, "error", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		allowed, err := ratelimit.AllowRequest(r.Context(), rdb, key.ID, settings.RateLimitPerMin, time.Minute)
+		if err != nil {
+			logger.Error("rate limit check failed", "error", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !allowed {
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), projectIDContextKey{}, key.ProjectID)
+		ctx = context.WithValue(ctx, gatewayKeyIDContextKey{}, key.ID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
 
 type chatCompletionRequest struct {
 	Model             string            `json:"model"`
@@ -52,7 +109,7 @@ func parseMessage(m chatMessageJSON) (providers.Message, error) {
 
 	var parts []contentPartJSON
 	if err := json.Unmarshal(m.Content, &parts); err != nil {
-		return providers.Message{}, fmt.Errorf("content must be a string or an array of parts")
+		return providers.Message{}, errBadContent
 	}
 
 	msg := providers.Message{Role: m.Role}
@@ -67,8 +124,12 @@ func parseMessage(m chatMessageJSON) (providers.Message, error) {
 	return msg, nil
 }
 
-func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, logger *slog.Logger) http.HandlerFunc {
+var errBadContent = errors.New("content must be a string or an array of parts")
+
+func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, logger *slog.Logger, defaults projectsettings.Defaults) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+
 		projectID, ok := ProjectIDFromContext(r.Context())
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -80,7 +141,7 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 			return
 		}
 
-		settings, err := projectsettings.Resolve(r.Context(), db, projectID)
+		settings, err := projectsettings.Resolve(r.Context(), db, projectID, defaults)
 		if err != nil {
 			logger.Error("failed to resolve project settings", "project", projectID, "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -98,7 +159,7 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 			return
 		}
 		defer concurrency.Release(context.Background(), rdb, projectID)
-		r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+
 		var reqBody chatCompletionRequest
 		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -154,63 +215,4 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 			writeNonStreamingResponse(w, out)
 		}
 	}
-}
-
-func RequireGatewayKey(db *sql.DB, rdb *redis.Client, logger *slog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("Authorization")
-		const prefix = "Bearer "
-		if !strings.HasPrefix(authHeader, prefix) {
-			http.Error(w, "missing or malformed Authorization header", http.StatusUnauthorized)
-			return
-		}
-		plaintext := strings.TrimPrefix(authHeader, prefix)
-
-		key, err := gatewaykeys.LookupByPlaintext(r.Context(), db, plaintext)
-		if err != nil {
-			logger.Error("gateway key lookup failed", "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if key == nil {
-			http.Error(w, "invalid API key", http.StatusUnauthorized)
-			return
-		}
-
-		settings, err := projectsettings.Resolve(r.Context(), db, key.ProjectID)
-		if err != nil {
-			logger.Error("failed to resolve project settings", "project", key.ProjectID, "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-
-		allowed, err := ratelimit.AllowRequest(r.Context(), rdb, key.ID, settings.RateLimitPerMin, time.Minute)
-		if err != nil {
-			logger.Error("rate limit check failed", "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if !allowed {
-			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-			return
-		}
-
-		ctx := context.WithValue(r.Context(), projectIDContextKey{}, key.ProjectID)
-		ctx = context.WithValue(ctx, gatewayKeyIDContextKey{}, key.ID)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-type projectIDContextKey struct{}
-
-func ProjectIDFromContext(ctx context.Context) (string, bool) {
-	id, ok := ctx.Value(projectIDContextKey{}).(string)
-	return id, ok
-}
-
-type gatewayKeyIDContextKey struct{}
-
-func GatewayKeyIDFromContext(ctx context.Context) (string, bool) {
-	id, ok := ctx.Value(gatewayKeyIDContextKey{}).(string)
-	return id, ok
 }
