@@ -11,13 +11,13 @@ type Settings struct {
 	TokenBudget          int
 }
 
-const (
-	defaultRateLimitPerMin      = 60
-	defaultMaxConcurrentStreams = 10
-	defaultTokenBudget          = 100000
-)
+type Defaults struct {
+	RateLimitPerMin      int
+	MaxConcurrentStreams int
+	TokenBudget          int
+}
 
-func Resolve(ctx context.Context, db *sql.DB, projectID string) (Settings, error) {
+func Resolve(ctx context.Context, db *sql.DB, projectID string, defaults Defaults) (Settings, error) {
 	var rateLimit, concurrency, budget sql.NullInt64
 
 	err := db.QueryRowContext(ctx, `
@@ -30,9 +30,9 @@ func Resolve(ctx context.Context, db *sql.DB, projectID string) (Settings, error
 	}
 
 	s := Settings{
-		RateLimitPerMin:      defaultRateLimitPerMin,
-		MaxConcurrentStreams: defaultMaxConcurrentStreams,
-		TokenBudget:          defaultTokenBudget,
+		RateLimitPerMin:      defaults.RateLimitPerMin,
+		MaxConcurrentStreams: defaults.MaxConcurrentStreams,
+		TokenBudget:          defaults.TokenBudget,
 	}
 
 	if rateLimit.Valid {
