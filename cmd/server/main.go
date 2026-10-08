@@ -1,0 +1,65 @@
+package main
+
+import (
+	"context"
+	"encoding/hex"
+	"log"
+	"net/http"
+
+	"github.com/Devpaul-01/llm-gateway/internal/applog"
+	"github.com/Devpaul-01/llm-gateway/internal/config"
+	"github.com/Devpaul-01/llm-gateway/internal/db"
+	"github.com/Devpaul-01/llm-gateway/internal/httpserver"
+	"github.com/Devpaul-01/llm-gateway/internal/projectsettings"
+	"github.com/Devpaul-01/llm-gateway/internal/redisclient"
+	"github.com/joho/godotenv"
+)
+
+func main() {
+	if err := godotenv.Load(); err != nil {
+		log.Println("no .env file found, relying on real environment variables")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("loading config: %v", err)
+	}
+
+	logger := applog.New()
+
+	ctx := context.Background()
+
+	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("connecting to database: %v", err)
+	}
+	defer pool.Close()
+	log.Println("connected to database successfully")
+
+	redisClient, err := redisclient.Connect(ctx, cfg.RedisURL)
+	if err != nil {
+		log.Fatalf("connecting to redis: %v", err)
+	}
+	defer redisClient.Close()
+	log.Println("connected to redis successfully")
+
+	encryptionKey, err := hex.DecodeString(cfg.EncryptionKey)
+	if err != nil {
+		log.Fatalf("decoding encryption key: %v", err)
+	}
+
+	defaults := projectsettings.Defaults{
+		RateLimitPerMin:      cfg.DefaultRateLimitPerMin,
+		MaxConcurrentStreams: cfg.DefaultMaxConcurrentStreams,
+		TokenBudget:          cfg.DefaultTokenBudget,
+	}
+
+	mux := httpserver.New(pool, redisClient, encryptionKey, cfg.AdminToken, logger, defaults)
+
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: mux,
+	}
+
+	httpserver.RunWithGracefulShutdown(srv, logger)
+}
