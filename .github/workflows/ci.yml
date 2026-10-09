@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-bookworm
+        env:
+          POSTGRES_USER: gateway
+          POSTGRES_PASSWORD: gateway_ci_password
+          POSTGRES_DB: llm_gateway_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gateway -d llm_gateway_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-bookworm
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://gateway:gateway_ci_password@localhost:5432/llm_gateway_test?sslmode=disable
+      REDIS_URL: redis://localhost:6379/0
+      # Test-only values -- never used against a real deployment. The
+      # encryption key must be valid 32-byte hex for config.Load /
+      # hex.DecodeString to succeed; it has no security relevance here
+      # since no real credentials are ever encrypted in CI.
+      ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      ADMIN_TOKEN: "ci-test-admin-token"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Apply database schema
+        run: psql "$DATABASE_URL" -f migrations/000001_init_schema.up.sql
+        env:
+          PGPASSWORD: gateway_ci_password
+
+      - name: go build
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: gofmt check
+        run: |
+          UNFORMATTED=$(gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "The following files are not gofmt-formatted:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
+      - name: go test
+        run: go test ./...
+
+      - name: go test -race
+        run: go test -race ./...
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (not pushed)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: llm-gateway:ci
