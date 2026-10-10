@@ -11,10 +11,18 @@ import (
 	"github.com/Devpaul-01/llm-gateway/internal/budget"
 	"github.com/Devpaul-01/llm-gateway/internal/cooldown"
 	"github.com/Devpaul-01/llm-gateway/internal/discovery"
+	"github.com/Devpaul-01/llm-gateway/internal/metrics"
 
 	"github.com/Devpaul-01/llm-gateway/internal/requestlog"
 	"github.com/redis/go-redis/v9"
 )
+
+func derefIntOrZero(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
 
 type requestLogContext struct {
 	DB           *sql.DB
@@ -36,6 +44,7 @@ type requestLogContext struct {
 func HandleChat(ctx context.Context, db *sql.DB, projectID, gatewayKeyID string, encryptionKey []byte, req Request, logger *slog.Logger, rdb *redis.Client) (<-chan Chunk, error) {
 	candidates, err := resolveCandidates(ctx, db, projectID, encryptionKey, req, logger, rdb)
 	if err != nil {
+		recordResolutionFailure(ctx, db, projectID, gatewayKeyID, req, err, logger)
 		return nil, err
 	}
 	return handleChatWithCandidates(ctx, req, candidates, requestLogContext{
@@ -53,6 +62,14 @@ func HandleChat(ctx context.Context, db *sql.DB, projectID, gatewayKeyID string,
 func HandleChatWithBudget(ctx context.Context, db *sql.DB, projectID, gatewayKeyID string, encryptionKey []byte, req Request, logger *slog.Logger, rdb *redis.Client, reservedBudgetTokens int) (<-chan Chunk, error) {
 	candidates, err := resolveCandidates(ctx, db, projectID, encryptionKey, req, logger, rdb)
 	if err != nil {
+		recordResolutionFailure(ctx, db, projectID, gatewayKeyID, req, err, logger)
+		// A failure here means no candidate was ever tried, so nothing
+		// was reserved against budget beyond the pre-request reservation
+		// auth.go already made via budget.CheckAndReserve -- that
+		// reservation is refunded in full by auth.go's caller context is
+		// out of scope here; resolveCandidates failing is a
+		// configuration/request error (no credentials, unknown model),
+		// not a billable attempt, so no budget.Adjust call belongs here.
 		return nil, err
 	}
 	return handleChatWithCandidates(ctx, req, candidates, requestLogContext{
@@ -61,6 +78,58 @@ func HandleChatWithBudget(ctx context.Context, db *sql.DB, projectID, gatewayKey
 		GatewayKeyID:         gatewayKeyID,
 		ReservedBudgetTokens: reservedBudgetTokens,
 	}, logger, rdb)
+}
+
+// recordResolutionFailure logs and records a request_logs row and a
+// metrics observation for a failure that happens during candidate
+// resolution itself (no credentials configured, unknown model, no
+// vision-capable candidate available, etc.) -- i.e. before
+// handleChatWithCandidates's goroutine (and the defer block that
+// normally does this) is ever constructed.
+//
+// This closes a gap found while wiring up the new /metrics endpoint and
+// verifying it end-to-end against a live server: a resolution failure
+// previously returned directly from HandleChat/HandleChatWithBudget with
+// no request_logs row and no metric at all, silently exempting an entire
+// class of real, common failures (misconfigured project, typo'd model
+// name, no credentials for the requested provider) from both historical
+// logging and live observability. It was not caught by the earlier
+// static audit -- only surfaced by actually running a request against a
+// project with no configured credentials and checking /metrics
+// afterward.
+func recordResolutionFailure(ctx context.Context, db *sql.DB, projectID, gatewayKeyID string, req Request, resolutionErr error, logger *slog.Logger) {
+	if db == nil {
+		return
+	}
+
+	provider := req.Provider
+	if provider == "" {
+		provider = "unknown"
+	}
+	model := req.Model
+	if model == "" {
+		model = "unknown"
+	}
+
+	category := NonRetryable.String()
+	if pe, ok := resolutionErr.(*ProviderError); ok {
+		category = pe.Category.String()
+	}
+
+	entry := requestlog.Entry{
+		ProjectID:     projectID,
+		GatewayKeyID:  gatewayKeyID,
+		Provider:      provider,
+		Model:         model,
+		Status:        "error",
+		ErrorCategory: &category,
+		Stream:        true,
+	}
+	if err := requestlog.Insert(context.Background(), db, entry); err != nil {
+		logger.Error("failed to write request log for resolution failure", "error", err)
+	}
+
+	metrics.Observe(provider, model, "error", 0, 0, false)
 }
 
 func buildContinuationRequest(original Request, accumulatedContent string) Request {
@@ -138,6 +207,21 @@ func handleChatWithCandidates(ctx context.Context, req Request, candidates []Can
 			if err := requestlog.Insert(context.Background(), logCtx.DB, entry); err != nil {
 				logger.Error("failed to write request log", "error", err)
 			}
+
+			// Record the same measurement as the request_logs row above
+			// into Prometheus (Architecture Section 14.2). Derived from
+			// the same totalMs/ttftMs/finalProvider/finalModel/finalStatus
+			// values just written to entry, not recomputed separately, so
+			// the metric and the log row can never disagree about what
+			// happened for a given request.
+			metrics.Observe(
+				finalProvider,
+				finalModel,
+				finalStatus,
+				float64(derefIntOrZero(ttftMs))/1000.0,
+				float64(totalMs)/1000.0,
+				ttftMs != nil,
+			)
 
 			// Refund the gap between what was reserved up front (the
 			// client's max_tokens ceiling, typically far larger than what
