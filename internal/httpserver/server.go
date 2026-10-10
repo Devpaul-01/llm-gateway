@@ -11,7 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Devpaul-01/llm-gateway/internal/metrics"
 	"github.com/Devpaul-01/llm-gateway/internal/projectsettings"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -93,6 +95,15 @@ func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte, adminToken string,
 	health := handleHealth(db, rdb)
 	mux.HandleFunc("GET /healthz", health)
 	mux.HandleFunc("GET /readyz", health)
+
+	// /metrics is intentionally unauthenticated, matching the conventional
+	// Prometheus scrape setup (network-level access control, e.g. only
+	// the cluster's own Prometheus instance can reach this port/path, is
+	// the normal way this endpoint is protected in practice -- adding a
+	// bearer-token check here would just complicate scrape config for a
+	// surface that exposes aggregate counts, not secrets or any
+	// individual project's data).
+	mux.Handle("GET /metrics", promhttp.HandlerFor(metrics.Registry, promhttp.HandlerOpts{}))
 
 	chatHandler := handleChatCompletions(db, rdb, encryptionKey, logger, defaults)
 	mux.Handle("POST /v1/chat/completions", RequireGatewayKey(db, rdb, logger, defaults, chatHandler))
