@@ -1,0 +1,86 @@
+{
+  "title": "LLM Gateway Overview",
+  "uid": "llm-gateway-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Request rate by provider and status",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(gateway_requests_total[5m])) by (provider, status)",
+          "legendFormat": "{{provider}} - {{status}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Time to first token (p50 / p95 / p99) by provider",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(gateway_ttft_seconds_bucket[5m])) by (le, provider))",
+          "legendFormat": "p50 {{provider}}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gateway_ttft_seconds_bucket[5m])) by (le, provider))",
+          "legendFormat": "p95 {{provider}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(gateway_ttft_seconds_bucket[5m])) by (le, provider))",
+          "legendFormat": "p99 {{provider}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Total request duration (p50 / p95 / p99) by provider",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(gateway_request_duration_seconds_bucket[5m])) by (le, provider))",
+          "legendFormat": "p50 {{provider}}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gateway_request_duration_seconds_bucket[5m])) by (le, provider))",
+          "legendFormat": "p95 {{provider}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(gateway_request_duration_seconds_bucket[5m])) by (le, provider))",
+          "legendFormat": "p99 {{provider}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Error rate (5m)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "sum(rate(gateway_requests_total{status=\"error\"}[5m])) / sum(rate(gateway_requests_total[5m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red", "value": 0.2 }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
