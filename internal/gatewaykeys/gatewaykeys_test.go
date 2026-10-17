@@ -60,3 +60,70 @@ func TestInsertAndLookup(t *testing.T) {
 		t.Error("expected nil for a nonexistent key, got a result")
 	}
 }
+
+// TestRevoke_RejectsKeyImmediately is the regression test for the
+// previously-missing revocation path (Audit §7.2 / ADR-04's "immediate
+// revocation" claim): after Revoke, the same plaintext key must no longer
+// be usable via LookupByPlaintext, which is exactly the check
+// RequireGatewayKey relies on for every incoming request.
+func TestRevoke_RejectsKeyImmediately(t *testing.T) {
+	_ = godotenv.Load("../../.env")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+
+	ctx := context.Background()
+	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		t.Fatalf("connecting to database: %v", err)
+	}
+	defer pool.Close()
+
+	var projectID string
+	err = pool.QueryRowContext(ctx, `
+		INSERT INTO projects (name) VALUES ($1) RETURNING id
+	`, "test-project-gatewaykeys-revoke").Scan(&projectID)
+	if err != nil {
+		t.Fatalf("creating test project: %v", err)
+	}
+	defer pool.ExecContext(ctx, `DELETE FROM projects WHERE id = $1`, projectID)
+
+	plaintext, keyID, err := Insert(ctx, pool, projectID, "revoke-test-key")
+	if err != nil {
+		t.Fatalf("inserting key: %v", err)
+	}
+
+	found, err := LookupByPlaintext(ctx, pool, plaintext)
+	if err != nil || found == nil {
+		t.Fatalf("expected key to be found before revoke, err: %v", err)
+	}
+
+	affected, err := Revoke(ctx, pool, projectID, keyID)
+	if err != nil {
+		t.Fatalf("revoking key: %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("expected 1 row affected, got %d", affected)
+	}
+
+	notFound, err := LookupByPlaintext(ctx, pool, plaintext)
+	if err != nil {
+		t.Fatalf("unexpected error looking up revoked key: %v", err)
+	}
+	if notFound != nil {
+		t.Error("expected revoked key to no longer be found by LookupByPlaintext")
+	}
+
+	keys, err := ListByProject(ctx, pool, projectID)
+	if err != nil {
+		t.Fatalf("listing keys: %v", err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 key in listing (revoked keys still listed), got %d", len(keys))
+	}
+	if keys[0].Status != "revoked" {
+		t.Errorf("expected status %q, got %q", "revoked", keys[0].Status)
+	}
+}
