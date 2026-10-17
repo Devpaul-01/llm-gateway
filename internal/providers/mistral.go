@@ -66,6 +66,14 @@ func (g *MistralProvider) Chat(ctx context.Context, req Request) (<-chan Chunk, 
 		defer resp.Body.Close()
 
 		scanner := bufio.NewScanner(resp.Body)
+		// pendingUsage carries the usage figures from whichever chunk
+		// reports them (typically the final chunk before [DONE]) through
+		// to the Done{} chunk this adapter emits. Previously this adapter
+		// defined mistralStreamChunk.Usage but never read it anywhere,
+		// so Chunk.Usage was always nil on the Done chunk -- which meant
+		// handler.go's tokensOut accounting (and the budget reconciliation
+		// that depends on it) could never actually fire for this provider.
+		var pendingUsage *Usage
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -82,7 +90,7 @@ func (g *MistralProvider) Chat(ctx context.Context, req Request) (<-chan Chunk, 
 			if payload == "[DONE]" {
 				select {
 				case <-ctx.Done():
-				case ch <- Chunk{Done: true}:
+				case ch <- Chunk{Done: true, Usage: pendingUsage}:
 				}
 				return
 			}
@@ -90,6 +98,14 @@ func (g *MistralProvider) Chat(ctx context.Context, req Request) (<-chan Chunk, 
 			var parsed mistralStreamChunk
 			if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
 				continue
+			}
+
+			if parsed.Usage != nil {
+				pendingUsage = &Usage{
+					PromptTokens:     parsed.Usage.PromptTokens,
+					CompletionTokens: parsed.Usage.CompletionTokens,
+					TotalTokens:      parsed.Usage.TotalTokens,
+				}
 			}
 
 			if len(parsed.Choices) == 0 {

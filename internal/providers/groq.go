@@ -23,12 +23,17 @@ type groqStreamChunk struct {
 		TotalTokens      int `json:"total_tokens"`
 	} `json:"usage"`
 }
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
 type groqRequestBody struct {
-	Model       string        `json:"model"`
-	Messages    []groqMessage `json:"messages"`
-	Temperature float64       `json:"temperature"`
-	MaxTokens   int           `json:"max_tokens"`
-	Stream      bool          `json:"stream"`
+	Model         string         `json:"model"`
+	Messages      []groqMessage  `json:"messages"`
+	Temperature   float64        `json:"temperature"`
+	MaxTokens     int            `json:"max_tokens"`
+	Stream        bool           `json:"stream"`
+	StreamOptions *streamOptions `json:"stream_options,omitempty"`
 }
 
 type GroqProvider struct {
@@ -64,6 +69,17 @@ func buildRequestBody(req Request, stream bool) (string, error) {
 		Temperature: req.Temperature,
 		MaxTokens:   req.MaxTokens,
 		Stream:      stream,
+	}
+	// Request usage accounting on the stream. This is the standard
+	// OpenAI-compatible convention (confirmed for Groq, Mistral, and
+	// OpenRouter) for getting a populated `usage` object on a trailing SSE
+	// chunk; without it, several of these providers return no usage data
+	// on streamed responses at all, which previously left every adapter's
+	// Chunk.Usage permanently nil regardless of whether the parsing code
+	// read it (see mistral.go/groq.go/openrouter.go's now-wired-up
+	// pendingUsage handling).
+	if stream {
+		body.StreamOptions = &streamOptions{IncludeUsage: true}
 	}
 
 	data, err := json.Marshal(body)
@@ -111,6 +127,7 @@ func (g *GroqProvider) Chat(ctx context.Context, req Request) (<-chan Chunk, err
 		defer resp.Body.Close()
 
 		scanner := bufio.NewScanner(resp.Body)
+		var pendingUsage *Usage
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -127,7 +144,7 @@ func (g *GroqProvider) Chat(ctx context.Context, req Request) (<-chan Chunk, err
 			if payload == "[DONE]" {
 				select {
 				case <-ctx.Done():
-				case ch <- Chunk{Done: true}:
+				case ch <- Chunk{Done: true, Usage: pendingUsage}:
 				}
 				return
 			}
@@ -135,6 +152,14 @@ func (g *GroqProvider) Chat(ctx context.Context, req Request) (<-chan Chunk, err
 			var parsed groqStreamChunk
 			if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
 				continue
+			}
+
+			if parsed.Usage != nil {
+				pendingUsage = &Usage{
+					PromptTokens:     parsed.Usage.PromptTokens,
+					CompletionTokens: parsed.Usage.CompletionTokens,
+					TotalTokens:      parsed.Usage.TotalTokens,
+				}
 			}
 
 			if len(parsed.Choices) == 0 {

@@ -22,7 +22,7 @@ func TestGroqProvider_LiveChatCompletion(t *testing.T) {
 	}
 
 	ch, err := gp.Chat(context.Background(), Request{
-		Model: "openai/gpt-oss-120b",
+		Model:       "openai/gpt-oss-120b",
 		Messages:    []Message{{Role: "user", Content: "Say the single word: hello"}},
 		MaxTokens:   20,
 		Temperature: 0.0,
@@ -33,6 +33,7 @@ func TestGroqProvider_LiveChatCompletion(t *testing.T) {
 
 	var fullContent string
 	var sawDone bool
+	var sawUsage bool
 	for chunk := range ch {
 		if chunk.Err != nil {
 			t.Fatalf("received error chunk: %v", chunk.Err)
@@ -40,6 +41,9 @@ func TestGroqProvider_LiveChatCompletion(t *testing.T) {
 		fullContent += chunk.Content
 		if chunk.Done {
 			sawDone = true
+			if chunk.Usage != nil {
+				sawUsage = true
+			}
 		}
 	}
 
@@ -48,6 +52,13 @@ func TestGroqProvider_LiveChatCompletion(t *testing.T) {
 	}
 	if fullContent == "" {
 		t.Error("expected non-empty content from Groq, got empty string")
+	}
+	// Regression check for the usage-never-populated bug found while
+	// implementing Finding B-3's budget reconciliation: Groq's adapter
+	// previously never read Usage off the stream at all, so this would
+	// always have been false before the fix.
+	if !sawUsage {
+		t.Error("expected the Done chunk to carry Usage now that stream_options.include_usage is requested and parsed")
 	}
 
 	t.Logf("Groq responded: %q", fullContent)

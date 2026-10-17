@@ -52,6 +52,7 @@ func (o *OpenRouterProvider) Chat(ctx context.Context, req Request) (<-chan Chun
 		defer resp.Body.Close()
 
 		scanner := bufio.NewScanner(resp.Body)
+		var pendingUsage *Usage
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -68,7 +69,7 @@ func (o *OpenRouterProvider) Chat(ctx context.Context, req Request) (<-chan Chun
 			if payload == "[DONE]" {
 				select {
 				case <-ctx.Done():
-				case ch <- Chunk{Done: true}:
+				case ch <- Chunk{Done: true, Usage: pendingUsage}:
 				}
 				return
 			}
@@ -76,6 +77,14 @@ func (o *OpenRouterProvider) Chat(ctx context.Context, req Request) (<-chan Chun
 			var parsed mistralStreamChunk
 			if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
 				continue
+			}
+
+			if parsed.Usage != nil {
+				pendingUsage = &Usage{
+					PromptTokens:     parsed.Usage.PromptTokens,
+					CompletionTokens: parsed.Usage.CompletionTokens,
+					TotalTokens:      parsed.Usage.TotalTokens,
+				}
 			}
 
 			if len(parsed.Choices) == 0 {
