@@ -76,6 +76,47 @@ func TestBuildRequestBody_PlainTextStaysAString(t *testing.T) {
 	}
 }
 
+func TestBuildRequestBody_RequestsUsageWhenStreaming(t *testing.T) {
+	body, err := buildRequestBody(Request{
+		Model:    "m",
+		Messages: []Message{{Role: "user", Content: "hello"}},
+	}, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(body, `"stream_options":{"include_usage":true}`) {
+		t.Errorf("expected stream_options.include_usage to be set when streaming, got %s", body)
+	}
+}
+
+func TestBuildRequestBody_OmitsStreamOptionsWhenNotStreaming(t *testing.T) {
+	body, err := buildRequestBody(Request{
+		Model:    "m",
+		Messages: []Message{{Role: "user", Content: "hello"}},
+	}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(body, "stream_options") {
+		t.Errorf("did not expect stream_options when not streaming, got %s", body)
+	}
+}
+
+// TestInferProviderForModel_ResolvesVisionModel is the direct regression
+// test for Finding B-4: the Groq vision model was previously present in
+// visionCapableModels but absent from modelToProvider, so it could never
+// resolve via the explicit-model path without the client separately (and
+// undocumented-ly) supplying provider: "groq" directly.
+func TestInferProviderForModel_ResolvesVisionModel(t *testing.T) {
+	provider, found := inferProviderForModel("meta-llama/llama-4-scout-17b-16e-instruct")
+	if !found {
+		t.Fatal("expected the Groq vision model to resolve to a provider, but it was not found")
+	}
+	if provider != "groq" {
+		t.Errorf("expected provider %q, got %q", "groq", provider)
+	}
+}
+
 func TestResolveCandidates_ExpandsFallbackModels(t *testing.T) {
 	_ = godotenv.Load("../../.env")
 
@@ -128,6 +169,57 @@ func TestResolveCandidates_ExpandsFallbackModels(t *testing.T) {
 		t.Errorf("expected second candidate to be mistral/mistral-large-latest, got %s/%s", candidates[1].ProviderName, candidates[1].Model)
 	}
 }
+
+// TestResolveCandidates_ResolvesVisionModelByNameAlone is the end-to-end
+// version of TestInferProviderForModel_ResolvesVisionModel: confirms a
+// real resolveCandidates call for the Groq vision model, with no explicit
+// provider field set, actually produces a usable candidate against real
+// Postgres -- not just that the lookup map entry exists.
+func TestResolveCandidates_ResolvesVisionModelByNameAlone(t *testing.T) {
+	_ = godotenv.Load("../../.env")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+
+	ctx := context.Background()
+	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		t.Fatalf("connecting to database: %v", err)
+	}
+	defer pool.Close()
+
+	encryptionKey, err := hex.DecodeString(cfg.EncryptionKey)
+	if err != nil {
+		t.Fatalf("decoding encryption key: %v", err)
+	}
+
+	var projectID string
+	err = pool.QueryRowContext(ctx, `INSERT INTO projects (name) VALUES ($1) RETURNING id`, "test-vision-model-resolve").Scan(&projectID)
+	if err != nil {
+		t.Fatalf("creating project: %v", err)
+	}
+	defer pool.ExecContext(ctx, `DELETE FROM projects WHERE id = $1`, projectID)
+
+	if err := credentials.Insert(ctx, pool, projectID, "groq", "vision-test", "fake-groq-key", encryptionKey); err != nil {
+		t.Fatalf("inserting groq credential: %v", err)
+	}
+
+	candidates, err := resolveCandidates(ctx, pool, projectID, encryptionKey, Request{
+		Model: "meta-llama/llama-4-scout-17b-16e-instruct",
+	}, testLogger, nil)
+	if err != nil {
+		t.Fatalf("expected the vision model to resolve without an explicit provider field, got error: %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	}
+	if candidates[0].ProviderName != "groq" {
+		t.Errorf("expected provider %q, got %q", "groq", candidates[0].ProviderName)
+	}
+}
+
 func TestResolveCandidates_SkipsCoolingCredential(t *testing.T) {
 	_ = godotenv.Load("../../.env")
 
