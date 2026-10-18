@@ -1,0 +1,106 @@
+services:
+  postgres:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gateway
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gateway_dev_password}
+      POSTGRES_DB: llm_gateway
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Postgres's official image automatically runs every .sql file in
+      # this directory, in filename order, on first container
+      # initialization only (i.e. when the data volume is empty) -- this
+      # is what applies migrations/000001_init_schema.up.sql without
+      # requiring a separate migration-tool dependency. This only covers
+      # the very first boot; later migrations added to this directory
+      # will NOT be re-applied to an already-initialized volume (Postgres
+      # intentionally only runs these on an empty data directory). See
+      # the README's migrations section for how to apply a new migration
+      # to an existing deployment.
+      - ./internal/db/migrations/000001_init_schema.up.sql:/docker-entrypoint-initdb.d/000001_init_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway -d llm_gateway"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-bookworm
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://gateway:${POSTGRES_PASSWORD:-gateway_dev_password}@postgres:5432/llm_gateway?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set -- generate one with: docker compose run --rm gateway /app/genkey}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?ADMIN_TOKEN must be set -- pick any long random string for local dev}
+      DEFAULT_RATE_LIMIT_PER_MIN: ${DEFAULT_RATE_LIMIT_PER_MIN:-60}
+      DEFAULT_MAX_CONCURRENT_STREAMS: ${DEFAULT_MAX_CONCURRENT_STREAMS:-10}
+      DEFAULT_TOKEN_BUDGET: ${DEFAULT_TOKEN_BUDGET:-100000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/gateway", "-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Prometheus and Grafana, per Architecture Section 16.2 ("(once built)
+  # Prometheus/Grafana") and Section 14.2/ADR-22's metrics scope. Both are
+  # optional for day-to-day gateway operation -- the gateway itself never
+  # depends on either being up -- so they're ordinary services here, not
+  # something gateway's healthcheck or startup depends on.
+  prometheus:
+    image: prom/prometheus:v3.13.2
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - gateway
+
+  grafana:
+    image: grafana/grafana:12.4.3
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Dev-only default; change this (or set GF_SECURITY_ADMIN_PASSWORD
+      # directly) for anything beyond local exploration.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
