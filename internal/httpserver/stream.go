@@ -15,12 +15,19 @@ func streamSSE(w http.ResponseWriter, chunks <-chan providers.Chunk) {
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", "streaming not supported")
 		return
 	}
 
 	for chunk := range chunks {
 		if chunk.Err != nil {
+			// SSE error frames are correctly sent as a "data: {...}" event
+			// per the SSE/OpenAI streaming convention, not as an HTTP
+			// error status -- headers and a 200 status have already been
+			// sent by this point, so an HTTP-level error response isn't
+			// possible here regardless. This is unrelated to Finding H-3,
+			// which was about non-streaming http.Error(...) calls that
+			// happen before any response body is written.
 			fmt.Fprintf(w, "data: {\"error\":%q}\n\n", chunk.Err.Error())
 			flusher.Flush()
 			return
@@ -61,7 +68,7 @@ func writeNonStreamingResponse(w http.ResponseWriter, chunks <-chan providers.Ch
 	}
 
 	if errChunk != nil {
-		http.Error(w, errChunk.Err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "internal_error", errChunk.Err.Error())
 		return
 	}
 

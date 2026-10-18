@@ -11,13 +11,13 @@ func RequireAdminToken(adminToken string, next http.Handler) http.Handler {
 		authHeader := r.Header.Get("Authorization")
 		const prefix = "Bearer "
 		if !strings.HasPrefix(authHeader, prefix) {
-			http.Error(w, "missing or malformed Authorization header", http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "unauthorized", "missing or malformed Authorization header")
 			return
 		}
 		provided := strings.TrimPrefix(authHeader, prefix)
 
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(adminToken)) != 1 {
-			http.Error(w, "invalid admin token", http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "unauthorized", "invalid admin token")
 			return
 		}
 

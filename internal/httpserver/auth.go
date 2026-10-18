@@ -37,7 +37,7 @@ func RequireGatewayKey(db *sql.DB, rdb *redis.Client, logger *slog.Logger, defau
 		authHeader := r.Header.Get("Authorization")
 		const prefix = "Bearer "
 		if !strings.HasPrefix(authHeader, prefix) {
-			http.Error(w, "missing or malformed Authorization header", http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "authentication_error", "missing or malformed Authorization header")
 			return
 		}
 		plaintext := strings.TrimPrefix(authHeader, prefix)
@@ -45,29 +45,29 @@ func RequireGatewayKey(db *sql.DB, rdb *redis.Client, logger *slog.Logger, defau
 		key, err := gatewaykeys.LookupByPlaintext(r.Context(), db, plaintext)
 		if err != nil {
 			logger.Error("gateway key lookup failed", "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
 			return
 		}
 		if key == nil {
-			http.Error(w, "invalid API key", http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "authentication_error", "invalid API key")
 			return
 		}
 
 		settings, err := projectsettings.Resolve(r.Context(), db, key.ProjectID, defaults)
 		if err != nil {
 			logger.Error("failed to resolve project settings", "project", key.ProjectID, "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
 			return
 		}
 
 		allowed, err := ratelimit.AllowRequest(r.Context(), rdb, key.ID, settings.RateLimitPerMin, time.Minute)
 		if err != nil {
 			logger.Error("rate limit check failed", "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
 			return
 		}
 		if !allowed {
-			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			writeJSONError(w, http.StatusTooManyRequests, "rate_limit_error", "rate limit exceeded")
 			return
 		}
 
@@ -132,37 +132,37 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 
 		projectID, ok := ProjectIDFromContext(r.Context())
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "authentication_error", "unauthorized")
 			return
 		}
 		gatewayKeyID, ok := GatewayKeyIDFromContext(r.Context())
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "authentication_error", "unauthorized")
 			return
 		}
 
 		settings, err := projectsettings.Resolve(r.Context(), db, projectID, defaults)
 		if err != nil {
 			logger.Error("failed to resolve project settings", "project", projectID, "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
 			return
 		}
 
 		allowedConcurrent, err := concurrency.Acquire(r.Context(), rdb, projectID, settings.MaxConcurrentStreams)
 		if err != nil {
 			logger.Error("concurrency check failed", "project", projectID, "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
 			return
 		}
 		if !allowedConcurrent {
-			http.Error(w, "too many concurrent requests for this project", http.StatusTooManyRequests)
+			writeJSONError(w, http.StatusTooManyRequests, "rate_limit_error", "too many concurrent requests for this project")
 			return
 		}
 		defer concurrency.Release(context.Background(), rdb, projectID)
 
 		var reqBody chatCompletionRequest
 		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-			http.Error(w, "invalid request body", http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "invalid_request_error", "invalid request body")
 			return
 		}
 
@@ -170,7 +170,7 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 		for i, m := range reqBody.Messages {
 			parsed, err := parseMessage(m)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				writeJSONError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 				return
 			}
 			messages[i] = parsed
@@ -184,11 +184,11 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 		allowedBudget, err := budget.CheckAndReserve(r.Context(), rdb, projectID, maxTokens, settings.TokenBudget)
 		if err != nil {
 			logger.Error("budget check failed", "project", projectID, "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "internal error")
 			return
 		}
 		if !allowedBudget {
-			http.Error(w, "daily token budget exceeded for this project", http.StatusTooManyRequests)
+			writeJSONError(w, http.StatusTooManyRequests, "rate_limit_error", "daily token budget exceeded for this project")
 			return
 		}
 
@@ -202,10 +202,16 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 			FallbackModels:    reqBody.FallbackModels,
 		}
 
-		out, err := providers.HandleChat(r.Context(), db, projectID, gatewayKeyID, encryptionKey, req, logger, rdb)
+		// HandleChatWithBudget (rather than HandleChat) so the
+		// maxTokens reservation made just above via CheckAndReserve gets
+		// reconciled against real usage once the request completes --
+		// Finding B-3's fix. Without threading maxTokens through here,
+		// handler.go would have no way to know what was reserved and
+		// therefore nothing to refund.
+		out, err := providers.HandleChatWithBudget(r.Context(), db, projectID, gatewayKeyID, encryptionKey, req, logger, rdb, maxTokens)
 		if err != nil {
 			logger.Error("chat handling failed", "project", projectID, "error", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
 
