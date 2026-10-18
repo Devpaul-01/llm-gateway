@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"time"
 
 	"github.com/Devpaul-01/llm-gateway/internal/applog"
 	"github.com/Devpaul-01/llm-gateway/internal/config"
@@ -15,7 +18,34 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// runHealthcheckMode is used as the container's HEALTHCHECK command
+// (docker-compose.yml). The distroless base image this binary ships in
+// has no shell, no curl, and no wget -- the usual CMD-SHELL "curl
+// localhost:8080/healthz" pattern is unavailable -- so the binary checks
+// its own health endpoint and exits 0/1 accordingly, giving Docker (and,
+// downstream, a PaaS that respects container health status) a real
+// signal without needing any additional tooling in the final image.
+func runHealthcheckMode() {
+	client := http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://localhost:8080/healthz")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "healthcheck request failed:", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintln(os.Stderr, "healthcheck returned status", resp.StatusCode)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
+		runHealthcheckMode()
+		return
+	}
+
 	if err := godotenv.Load(); err != nil {
 		log.Println("no .env file found, relying on real environment variables")
 	}
@@ -55,8 +85,11 @@ func main() {
 	}
 
 	mux := httpserver.New(pool, redisClient, encryptionKey, cfg.AdminToken, logger, defaults)
-	log.Println("starting server on :8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
-		log.Fatalf("server error: %v", err)
+
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: mux,
 	}
+
+	httpserver.RunWithGracefulShutdown(srv, logger)
 }
