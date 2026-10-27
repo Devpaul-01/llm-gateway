@@ -1,6 +1,5 @@
 package providers
 
-
 type ErrorCategory int
 
 const (
