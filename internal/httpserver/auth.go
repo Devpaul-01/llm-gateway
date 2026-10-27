@@ -3,24 +3,21 @@ package httpserver
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/Devpaul-01/llm-gateway/internal/budget"
-	"github.com/Devpaul-01/llm-gateway/internal/concurrency"
 	"github.com/Devpaul-01/llm-gateway/internal/gatewaykeys"
 	"github.com/Devpaul-01/llm-gateway/internal/projectsettings"
-	"github.com/Devpaul-01/llm-gateway/internal/providers"
 	"github.com/Devpaul-01/llm-gateway/internal/ratelimit"
+	"github.com/Devpaul-01/llm-gateway/internal/stats"
 	"github.com/redis/go-redis/v9"
 )
 
 type projectIDContextKey struct{}
 type gatewayKeyIDContextKey struct{}
+type settingsContextKey struct{}
 
 func ProjectIDFromContext(ctx context.Context) (string, bool) {
 	id, ok := ctx.Value(projectIDContextKey{}).(string)
@@ -32,187 +29,56 @@ func GatewayKeyIDFromContext(ctx context.Context) (string, bool) {
 	return id, ok
 }
 
+// SettingsFromContext returns the project settings the auth middleware already
+// resolved, so handlers don't query them a second time.
+func SettingsFromContext(ctx context.Context) (projectsettings.Settings, bool) {
+	s, ok := ctx.Value(settingsContextKey{}).(projectsettings.Settings)
+	return s, ok
+}
+
 func RequireGatewayKey(db *sql.DB, rdb *redis.Client, logger *slog.Logger, defaults projectsettings.Defaults, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		const prefix = "Bearer "
 		if !strings.HasPrefix(authHeader, prefix) {
-			http.Error(w, "missing or malformed Authorization header", http.StatusUnauthorized)
+			writeAPIError(w, http.StatusUnauthorized, "missing_api_key", "missing or malformed Authorization header, expected: Bearer <gateway key>")
 			return
 		}
 		plaintext := strings.TrimPrefix(authHeader, prefix)
 
-		key, err := gatewaykeys.LookupByPlaintext(r.Context(), db, plaintext)
+		key, err := gatewaykeys.LookupCached(r.Context(), db, rdb, plaintext)
 		if err != nil {
 			logger.Error("gateway key lookup failed", "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal error")
 			return
 		}
 		if key == nil {
-			http.Error(w, "invalid API key", http.StatusUnauthorized)
+			writeAPIError(w, http.StatusUnauthorized, "invalid_api_key", "invalid API key")
 			return
 		}
 
-		settings, err := projectsettings.Resolve(r.Context(), db, key.ProjectID, defaults)
+		settings, err := projectsettings.ResolveCached(r.Context(), db, rdb, key.ProjectID, defaults)
 		if err != nil {
 			logger.Error("failed to resolve project settings", "project", key.ProjectID, "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal error")
 			return
 		}
 
 		allowed, err := ratelimit.AllowRequest(r.Context(), rdb, key.ID, settings.RateLimitPerMin, time.Minute)
 		if err != nil {
 			logger.Error("rate limit check failed", "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal error")
 			return
 		}
 		if !allowed {
-			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			stats.IncrAsync(rdb, key.ProjectID, stats.RateLimited)
+			writeAPIError(w, http.StatusTooManyRequests, "rate_limit_exceeded", "rate limit exceeded for this API key")
 			return
 		}
 
 		ctx := context.WithValue(r.Context(), projectIDContextKey{}, key.ProjectID)
 		ctx = context.WithValue(ctx, gatewayKeyIDContextKey{}, key.ID)
+		ctx = context.WithValue(ctx, settingsContextKey{}, settings)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
-}
-
-type chatCompletionRequest struct {
-	Model             string            `json:"model"`
-	Provider          string            `json:"provider"`
-	Messages          []chatMessageJSON `json:"messages"`
-	Temperature       float64           `json:"temperature"`
-	MaxTokens         int               `json:"max_tokens"`
-	Stream            bool              `json:"stream"`
-	ContinueOnFailure bool              `json:"continue_on_failure"`
-	FallbackModels    []string          `json:"fallback_models"`
-}
-
-type chatMessageJSON struct {
-	Role    string          `json:"role"`
-	Content json.RawMessage `json:"content"`
-}
-
-type contentPartJSON struct {
-	Type     string `json:"type"`
-	Text     string `json:"text"`
-	ImageURL struct {
-		URL string `json:"url"`
-	} `json:"image_url"`
-}
-
-func parseMessage(m chatMessageJSON) (providers.Message, error) {
-	var text string
-	if err := json.Unmarshal(m.Content, &text); err == nil {
-		return providers.Message{Role: m.Role, Content: text}, nil
-	}
-
-	var parts []contentPartJSON
-	if err := json.Unmarshal(m.Content, &parts); err != nil {
-		return providers.Message{}, errBadContent
-	}
-
-	msg := providers.Message{Role: m.Role}
-	for _, p := range parts {
-		switch p.Type {
-		case "text":
-			msg.Content += p.Text
-		case "image_url":
-			msg.Images = append(msg.Images, providers.Image{URL: p.ImageURL.URL})
-		}
-	}
-	return msg, nil
-}
-
-var errBadContent = errors.New("content must be a string or an array of parts")
-
-func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, logger *slog.Logger, defaults projectsettings.Defaults) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
-
-		projectID, ok := ProjectIDFromContext(r.Context())
-		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		gatewayKeyID, ok := GatewayKeyIDFromContext(r.Context())
-		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		settings, err := projectsettings.Resolve(r.Context(), db, projectID, defaults)
-		if err != nil {
-			logger.Error("failed to resolve project settings", "project", projectID, "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-
-		allowedConcurrent, err := concurrency.Acquire(r.Context(), rdb, projectID, settings.MaxConcurrentStreams)
-		if err != nil {
-			logger.Error("concurrency check failed", "project", projectID, "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if !allowedConcurrent {
-			http.Error(w, "too many concurrent requests for this project", http.StatusTooManyRequests)
-			return
-		}
-		defer concurrency.Release(context.Background(), rdb, projectID)
-
-		var reqBody chatCompletionRequest
-		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-			http.Error(w, "invalid request body", http.StatusBadRequest)
-			return
-		}
-
-		messages := make([]providers.Message, len(reqBody.Messages))
-		for i, m := range reqBody.Messages {
-			parsed, err := parseMessage(m)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			messages[i] = parsed
-		}
-
-		maxTokens := reqBody.MaxTokens
-		if maxTokens <= 0 {
-			maxTokens = 1024
-		}
-
-		allowedBudget, err := budget.CheckAndReserve(r.Context(), rdb, projectID, maxTokens, settings.TokenBudget)
-		if err != nil {
-			logger.Error("budget check failed", "project", projectID, "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if !allowedBudget {
-			http.Error(w, "daily token budget exceeded for this project", http.StatusTooManyRequests)
-			return
-		}
-
-		req := providers.Request{
-			Model:             reqBody.Model,
-			Provider:          reqBody.Provider,
-			Messages:          messages,
-			Temperature:       reqBody.Temperature,
-			MaxTokens:         maxTokens,
-			ContinueOnFailure: reqBody.ContinueOnFailure,
-			FallbackModels:    reqBody.FallbackModels,
-		}
-
-		out, err := providers.HandleChat(r.Context(), db, projectID, gatewayKeyID, encryptionKey, req, logger, rdb)
-		if err != nil {
-			logger.Error("chat handling failed", "project", projectID, "error", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if reqBody.Stream {
-			streamSSE(w, out)
-		} else {
-			writeNonStreamingResponse(w, out)
-		}
-	}
 }

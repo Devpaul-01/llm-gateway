@@ -15,13 +15,13 @@ func TestEvictModel_RemovesOnlyTheNamedModel(t *testing.T) {
 
 	cfg, err := config.Load()
 	if err != nil {
-		t.Fatalf("loading config: %v", err)
+		t.Skipf("config not available (set DATABASE_URL, REDIS_URL, ENCRYPTION_KEY, ADMIN_TOKEN): %v", err)
 	}
 
 	ctx := context.Background()
 	rdb, err := redisclient.Connect(ctx, cfg.RedisURL)
 	if err != nil {
-		t.Fatalf("connecting to redis: %v", err)
+		t.Skipf("cannot connect to redis: %v", err)
 	}
 	defer rdb.Close()
 

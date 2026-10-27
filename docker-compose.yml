@@ -1,0 +1,36 @@
+# Local stack: Postgres + Redis + the gateway.
+#   export ENCRYPTION_KEY=$(go run ./cmd/genkey)   # or any 64 hex chars
+#   export ADMIN_TOKEN=$(openssl rand -hex 16)
+#   docker compose up --build
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: gateway
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gateway"]
+      interval: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      retries: 20
+
+  gateway:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/gateway?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?run: export ENCRYPTION_KEY=$(go run ./cmd/genkey)}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN}
+      PUBLIC_METRICS_ENABLED: "true"
+      CORS_ALLOWED_ORIGINS: "*"

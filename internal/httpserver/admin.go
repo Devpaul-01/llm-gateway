@@ -1,14 +1,49 @@
 package httpserver
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Devpaul-01/llm-gateway/internal/credentials"
 	"github.com/Devpaul-01/llm-gateway/internal/gatewaykeys"
+	"github.com/Devpaul-01/llm-gateway/internal/projectsettings"
+	"github.com/Devpaul-01/llm-gateway/internal/providers"
+	"github.com/Devpaul-01/llm-gateway/internal/respcache"
+	"github.com/redis/go-redis/v9"
 )
+
+// optionalInt distinguishes "field absent" (leave the setting alone) from
+// "field null" (clear the override back to the default) from "field set".
+type optionalInt struct {
+	Set bool
+	Val *int
+}
+
+func (o *optionalInt) UnmarshalJSON(b []byte) error {
+	o.Set = true
+	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
+		o.Val = nil
+		return nil
+	}
+	var v int
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	o.Val = &v
+	return nil
+}
+
+func (o optionalInt) validate(name string) error {
+	if o.Set && o.Val != nil && *o.Val <= 0 {
+		return fmt.Errorf("%s must be a positive integer or null", name)
+	}
+	return nil
+}
 
 type createProjectRequest struct {
 	Name string `json:"name"`
@@ -47,9 +82,9 @@ type projectResponse struct {
 }
 
 type updateProjectSettingsRequest struct {
-	RateLimitPerMin      *int `json:"rate_limit_per_min"`
-	MaxConcurrentStreams *int `json:"max_concurrent_streams"`
-	TokenBudget          *int `json:"token_budget"`
+	RateLimitPerMin      optionalInt `json:"rate_limit_per_min"`
+	MaxConcurrentStreams optionalInt `json:"max_concurrent_streams"`
+	TokenBudget          optionalInt `json:"token_budget"`
 }
 
 func handleListProjects(db *sql.DB) http.HandlerFunc {
@@ -145,7 +180,7 @@ func handleGetProject(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func handleUpdateProjectSettings(db *sql.DB) http.HandlerFunc {
+func handleUpdateProjectSettings(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectID := r.PathValue("id")
 		if projectID == "" {
@@ -158,22 +193,45 @@ func handleUpdateProjectSettings(db *sql.DB) http.HandlerFunc {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
+		for name, f := range map[string]optionalInt{
+			"rate_limit_per_min":     body.RateLimitPerMin,
+			"max_concurrent_streams": body.MaxConcurrentStreams,
+			"token_budget":           body.TokenBudget,
+		} {
+			if err := f.validate(name); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
 
-		_, err := db.ExecContext(r.Context(), `
-			UPDATE projects
-			SET rate_limit_per_min = $1, max_concurrent_streams = $2, token_budget = $3
-			WHERE id = $4
-		`, body.RateLimitPerMin, body.MaxConcurrentStreams, body.TokenBudget, projectID)
+		// PATCH semantics: only fields present in the body change. A field set to
+		// null clears the override (falls back to the server default).
+		res, err := db.ExecContext(r.Context(), `
+			UPDATE projects SET
+			  rate_limit_per_min     = CASE WHEN $1::boolean THEN $2::integer ELSE rate_limit_per_min END,
+			  max_concurrent_streams = CASE WHEN $3::boolean THEN $4::integer ELSE max_concurrent_streams END,
+			  token_budget           = CASE WHEN $5::boolean THEN $6::integer ELSE token_budget END
+			WHERE id = $7
+		`, body.RateLimitPerMin.Set, body.RateLimitPerMin.Val,
+			body.MaxConcurrentStreams.Set, body.MaxConcurrentStreams.Val,
+			body.TokenBudget.Set, body.TokenBudget.Val, projectID)
 		if err != nil {
 			http.Error(w, "failed to update project settings", http.StatusInternalServerError)
 			return
 		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			http.Error(w, "project not found", http.StatusNotFound)
+			return
+		}
+
+		// Settings are cached; evict so the change applies on the very next request.
+		projectsettings.Invalidate(r.Context(), rdb, projectID)
 
 		w.WriteHeader(http.StatusOK)
 	}
 }
 
-func handleCreateCredential(db *sql.DB, encryptionKey []byte) http.HandlerFunc {
+func handleCreateCredential(db *sql.DB, rdb *redis.Client, encryptionKey []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body createCredentialRequest
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -185,11 +243,17 @@ func handleCreateCredential(db *sql.DB, encryptionKey []byte) http.HandlerFunc {
 			return
 		}
 
+		if !providers.IsKnownProvider(body.Provider) {
+			http.Error(w, fmt.Sprintf("unknown provider %q, supported: %s", body.Provider, strings.Join(providers.KnownProviders(), ", ")), http.StatusBadRequest)
+			return
+		}
+
 		err := credentials.Insert(r.Context(), db, body.ProjectID, body.Provider, body.Label, body.APIKey, encryptionKey)
 		if err != nil {
 			http.Error(w, "failed to create credential", http.StatusInternalServerError)
 			return
 		}
+		credentials.Invalidate(r.Context(), rdb, body.ProjectID, body.Provider)
 
 		w.WriteHeader(http.StatusCreated)
 	}
@@ -247,5 +311,38 @@ func handleCreateProject(db *sql.DB) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(createProjectResponse{ID: projectID})
+	}
+}
+
+func handleRevokeGatewayKey(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		found, err := gatewaykeys.Revoke(r.Context(), db, rdb, r.PathValue("id"))
+		if err != nil {
+			http.Error(w, "failed to revoke gateway key", http.StatusInternalServerError)
+			return
+		}
+		if !found {
+			http.Error(w, "gateway key not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// handleFlushCache invalidates every cached response of a project at once.
+func handleFlushCache(rdb *redis.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := respcache.Invalidate(r.Context(), rdb, r.PathValue("id")); err != nil {
+			http.Error(w, "failed to flush cache", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleListProviders() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"providers": providers.KnownProviders()})
 	}
 }

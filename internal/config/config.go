@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -15,6 +16,28 @@ type Config struct {
 	DefaultRateLimitPerMin      int
 	DefaultMaxConcurrentStreams int
 	DefaultTokenBudget          int
+
+	Port        string
+	AutoMigrate bool
+
+	CacheEnabled    bool
+	CacheTTLSeconds int
+
+	PublicMetrics          bool
+	PublicMetricsProjectID string
+	CORSAllowedOrigins     []string
+}
+
+func boolFromEnv(name string, fallback bool) (bool, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback, nil
+	}
+	b, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s must be true or false, got %q", name, raw)
+	}
+	return b, nil
 }
 
 func intFromEnv(name string, fallback int) (int, error) {
@@ -60,6 +83,33 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	cacheEnabled, err := boolFromEnv("CACHE_ENABLED", true)
+	if err != nil {
+		return nil, err
+	}
+	cacheTTL, err := intFromEnv("CACHE_TTL_SECONDS", 3600)
+	if err != nil {
+		return nil, err
+	}
+	autoMigrate, err := boolFromEnv("AUTO_MIGRATE", true)
+	if err != nil {
+		return nil, err
+	}
+	publicMetrics, err := boolFromEnv("PUBLIC_METRICS_ENABLED", false)
+	if err != nil {
+		return nil, err
+	}
+	var origins []string
+	for _, o := range strings.Split(os.Getenv("CORS_ALLOWED_ORIGINS"), ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			origins = append(origins, o)
+		}
+	}
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
 	return &Config{
 		DatabaseURL:                 dbURL,
 		EncryptionKey:               key,
@@ -68,5 +118,12 @@ func Load() (*Config, error) {
 		DefaultRateLimitPerMin:      rateLimit,
 		DefaultMaxConcurrentStreams: maxConcurrent,
 		DefaultTokenBudget:          tokenBudget,
+		Port:                        port,
+		AutoMigrate:                 autoMigrate,
+		CacheEnabled:                cacheEnabled,
+		CacheTTLSeconds:             cacheTTL,
+		PublicMetrics:               publicMetrics,
+		PublicMetricsProjectID:      strings.TrimSpace(os.Getenv("PUBLIC_METRICS_PROJECT_ID")),
+		CORSAllowedOrigins:          origins,
 	}, nil
 }

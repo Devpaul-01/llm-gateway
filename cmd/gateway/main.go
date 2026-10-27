@@ -3,8 +3,13 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/Devpaul-01/llm-gateway/internal/applog"
 	"github.com/Devpaul-01/llm-gateway/internal/config"
@@ -36,6 +41,12 @@ func main() {
 	defer pool.Close()
 	log.Println("connected to database successfully")
 
+	if cfg.AutoMigrate {
+		if err := db.Migrate(ctx, pool, logger); err != nil {
+			log.Fatalf("running migrations: %v", err)
+		}
+	}
+
 	redisClient, err := redisclient.Connect(ctx, cfg.RedisURL)
 	if err != nil {
 		log.Fatalf("connecting to redis: %v", err)
@@ -54,9 +65,42 @@ func main() {
 		TokenBudget:          cfg.DefaultTokenBudget,
 	}
 
-	mux := httpserver.New(pool, redisClient, encryptionKey, cfg.AdminToken, logger, defaults)
-	log.Println("starting server on :8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	mux := httpserver.New(pool, redisClient, encryptionKey, cfg.AdminToken, logger, defaults, httpserver.Options{
+		CacheEnabled:           cfg.CacheEnabled,
+		CacheTTL:               time.Duration(cfg.CacheTTLSeconds) * time.Second,
+		PublicMetrics:          cfg.PublicMetrics,
+		PublicMetricsProjectID: cfg.PublicMetricsProjectID,
+		CORSOrigins:            cfg.CORSAllowedOrigins,
+	})
+
+	// No WriteTimeout on purpose: completions stream for as long as the model
+	// talks. ReadHeaderTimeout/IdleTimeout still defend against slow-loris.
+	srv := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	// Graceful shutdown: on SIGTERM (a deploy, a container stop) stop accepting
+	// new requests but let in-flight streams finish instead of cutting them off.
+	done := make(chan struct{})
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+		<-sig
+		log.Println("shutting down, draining in-flight requests...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("graceful shutdown incomplete: %v", err)
+		}
+		close(done)
+	}()
+
+	log.Printf("starting server on :%s", cfg.Port)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("server error: %v", err)
 	}
+	<-done
 }

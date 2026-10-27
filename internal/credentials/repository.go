@@ -26,6 +26,7 @@ func GetByProjectAndProvider(ctx context.Context, db *sql.DB, projectID, provide
 		SELECT id, project_id, provider, label, encrypted_key, key_nonce, status, created_at
 		FROM provider_credentials
 		WHERE project_id = $1 AND provider = $2 AND status = 'active'
+		ORDER BY created_at, id
 	`, projectID, provider)
 	if err != nil {
 		return nil, err

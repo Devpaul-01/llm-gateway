@@ -16,10 +16,7 @@ func TestGeminiProvider_LiveChatCompletion(t *testing.T) {
 		t.Skip("GEMINI_API_KEY not set, skipping live Gemini integration test")
 	}
 
-	gp := &GeminiProvider{
-		APIKey:  apiKey,
-		BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
-	}
+	gp := NewOpenAICompat("gemini", apiKey, "https://generativelanguage.googleapis.com/v1beta/openai")
 
 	ch, err := gp.Chat(context.Background(), Request{
 		Model:       "gemini-2.5-flash-lite",

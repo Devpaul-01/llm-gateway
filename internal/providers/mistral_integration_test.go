@@ -16,10 +16,7 @@ func TestMistralProvider_LiveChatCompletion(t *testing.T) {
 		t.Skip("MISTRAL_API_KEY not set, skipping live mistral integration test")
 	}
 
-	gp := &MistralProvider{
-		APIKey:  apiKey,
-		BaseURL: "https://api.mistral.ai/v1",
-	}
+	gp := NewOpenAICompat("mistral", apiKey, "https://api.mistral.ai/v1")
 
 	ch, err := gp.Chat(context.Background(), Request{
 		Model:       "mistral-large-latest",

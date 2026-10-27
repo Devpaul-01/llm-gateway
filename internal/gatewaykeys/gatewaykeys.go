@@ -6,8 +6,22 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"time"
+
+	"github.com/redis/go-redis/v9"
 )
+
+const (
+	positiveCacheTTL = 5 * time.Minute
+	// Unknown keys are cached briefly too, so a client spamming bad keys can't
+	// turn every attempt into a database query.
+	negativeCacheTTL = 15 * time.Second
+	negativeMarker   = "-"
+)
+
+func cacheKey(hash string) string { return "gwkey:" + hash }
 
 type GatewayKey struct {
 	ID        string
@@ -68,4 +82,67 @@ func LookupByPlaintext(ctx context.Context, db *sql.DB, plaintext string) (*Gate
 	}
 
 	return &gk, nil
+}
+
+// LookupCached is LookupByPlaintext with a Redis read-through cache in front.
+// Auth runs on every request, so this removes a database round trip from the
+// hot path. Revoke and Insert invalidate the entry, so revocation is immediate.
+func LookupCached(ctx context.Context, db *sql.DB, rdb *redis.Client, plaintext string) (*GatewayKey, error) {
+	if rdb == nil {
+		return LookupByPlaintext(ctx, db, plaintext)
+	}
+	hash := hashKey(plaintext)
+	key := cacheKey(hash)
+
+	if cached, err := rdb.Get(ctx, key).Result(); err == nil {
+		if cached == negativeMarker {
+			return nil, nil
+		}
+		var gk GatewayKey
+		if json.Unmarshal([]byte(cached), &gk) == nil {
+			return &gk, nil
+		}
+	}
+
+	gk, err := LookupByPlaintext(ctx, db, plaintext)
+	if err != nil {
+		return nil, err
+	}
+	if gk == nil {
+		rdb.Set(ctx, key, negativeMarker, negativeCacheTTL)
+		return nil, nil
+	}
+	if data, err := json.Marshal(gk); err == nil {
+		rdb.Set(ctx, key, data, positiveCacheTTL)
+	}
+	return gk, nil
+}
+
+// InvalidatePlaintext drops any cached entry (including a negative one) for a key.
+func InvalidatePlaintext(ctx context.Context, rdb *redis.Client, plaintext string) {
+	if rdb == nil {
+		return
+	}
+	rdb.Del(ctx, cacheKey(hashKey(plaintext)))
+}
+
+// Revoke disables a gateway key and evicts it from the auth cache, returning
+// false if no such key exists.
+func Revoke(ctx context.Context, db *sql.DB, rdb *redis.Client, keyID string) (bool, error) {
+	var hash string
+	err := db.QueryRowContext(ctx, `
+		UPDATE gateway_api_keys SET status = 'revoked'
+		WHERE id = $1
+		RETURNING key_hash
+	`, keyID).Scan(&hash)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if rdb != nil {
+		rdb.Del(ctx, cacheKey(hash))
+	}
+	return true, nil
 }

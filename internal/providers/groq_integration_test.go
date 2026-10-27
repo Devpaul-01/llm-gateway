@@ -16,10 +16,7 @@ func TestGroqProvider_LiveChatCompletion(t *testing.T) {
 		t.Skip("GROQ_API_KEY not set, skipping live Groq integration test")
 	}
 
-	gp := &GroqProvider{
-		APIKey:  apiKey,
-		BaseURL: "https://api.groq.com/openai/v1",
-	}
+	gp := NewOpenAICompat("groq", apiKey, "https://api.groq.com/openai/v1")
 
 	ch, err := gp.Chat(context.Background(), Request{
 		Model:       "openai/gpt-oss-120b",
