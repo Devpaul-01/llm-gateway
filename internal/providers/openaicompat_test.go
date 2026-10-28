@@ -148,6 +148,25 @@ func TestBuildRequestBody_ProviderSpecificParameters(t *testing.T) {
 	}
 }
 
+func TestRegistry_AllProvidersBuildAdaptersAndEnvOverrideWorks(t *testing.T) {
+	for _, name := range KnownProviders() {
+		if newProviderAdapter(name, "k") == nil {
+			t.Errorf("no adapter for %s", name)
+		}
+	}
+	if len(KnownProviders()) < 12 {
+		t.Errorf("expected at least 12 providers, got %d", len(KnownProviders()))
+	}
+	t.Setenv("PROVIDER_OPENAI_BASE_URL", "http://localhost:9999/v1")
+	a := newProviderAdapter("openai", "k").(*OpenAICompatProvider)
+	if a.BaseURL != "http://localhost:9999/v1" || !a.MaxCompletionTokens {
+		t.Errorf("override/spec not applied: %+v", a)
+	}
+	if newProviderAdapter("nope", "k") != nil {
+		t.Error("unknown provider must yield no adapter")
+	}
+}
+
 func TestProviderError_HTTPStatus(t *testing.T) {
 	cases := []struct {
 		e    *ProviderError

@@ -23,6 +23,14 @@ var providerRegistry = map[string]providerSpec{
 	"mistral":    {BaseURL: "https://api.mistral.ai/v1", StreamUsage: true},
 	"openrouter": {BaseURL: "https://openrouter.ai/api/v1", StreamUsage: true},
 	"gemini":     {BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", StreamUsage: true},
+	"openai":     {BaseURL: "https://api.openai.com/v1", StreamUsage: true, MaxCompletionTokens: true},
+	"deepseek":   {BaseURL: "https://api.deepseek.com/v1", StreamUsage: true},
+	"together":   {BaseURL: "https://api.together.xyz/v1", StreamUsage: true},
+	"fireworks":  {BaseURL: "https://api.fireworks.ai/inference/v1", StreamUsage: true},
+	"cerebras":   {BaseURL: "https://api.cerebras.ai/v1"},
+	"xai":        {BaseURL: "https://api.x.ai/v1", StreamUsage: true},
+	"deepinfra":  {BaseURL: "https://api.deepinfra.com/v1/openai", StreamUsage: true},
+	"sambanova":  {BaseURL: "https://api.sambanova.ai/v1"},
 }
 
 // IsKnownProvider reports whether name is a provider the gateway can route to.
