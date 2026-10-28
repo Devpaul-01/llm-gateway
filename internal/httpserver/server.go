@@ -94,10 +94,19 @@ type Options struct {
 	// CacheEnabled turns on the Redis response cache for temperature-0 requests.
 	CacheEnabled bool
 	CacheTTL     time.Duration
+
+	// PublicMetrics exposes GET /public/metrics (no auth, read-only) for a
+	// portfolio/status page. PublicMetricsProjectID scopes it to one project
+	// (empty = aggregate all projects).
+	PublicMetrics          bool
+	PublicMetricsProjectID string
+	// CORSOrigins are the origins allowed to call /public/* from a browser.
+	CORSOrigins []string
 }
 
 // New builds the HTTP mux. opts is variadic so existing callers (and tests)
-// that predate Options keep compiling; with none given, the response cache is off.
+// that predate Options keep compiling; with none given, the response cache and
+// the public metrics endpoint are off.
 func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte, adminToken string, logger *slog.Logger, defaults projectsettings.Defaults, optsList ...Options) *http.ServeMux {
 	var opts Options
 	if len(optsList) > 0 {
@@ -138,6 +147,13 @@ func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte, adminToken string,
 
 	mux.Handle("DELETE /admin/projects/{id}/cache", RequireAdminToken(adminToken, handleFlushCache(rdb)))
 	mux.Handle("GET /admin/providers", RequireAdminToken(adminToken, handleListProviders()))
+	mux.Handle("GET /admin/metrics", RequireAdminToken(adminToken, handleAdminMetrics(db, rdb, logger)))
+
+	if opts.PublicMetrics {
+		pub := withCORS(opts.CORSOrigins, handlePublicMetrics(db, rdb, logger, opts.PublicMetricsProjectID))
+		mux.Handle("GET /public/metrics", pub)
+		mux.Handle("OPTIONS /public/metrics", pub)
+	}
 
 	return mux
 }
