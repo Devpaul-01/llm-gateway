@@ -89,7 +89,20 @@ func handleHealth(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
 	}
 }
 
-func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte, adminToken string, logger *slog.Logger, defaults projectsettings.Defaults) *http.ServeMux {
+// Options are the runtime switches that don't belong to any one handler.
+type Options struct {
+	// CacheEnabled turns on the Redis response cache for temperature-0 requests.
+	CacheEnabled bool
+	CacheTTL     time.Duration
+}
+
+// New builds the HTTP mux. opts is variadic so existing callers (and tests)
+// that predate Options keep compiling; with none given, the response cache is off.
+func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte, adminToken string, logger *slog.Logger, defaults projectsettings.Defaults, optsList ...Options) *http.ServeMux {
+	var opts Options
+	if len(optsList) > 0 {
+		opts = optsList[0]
+	}
 	mux := http.NewServeMux()
 
 	health := handleHealth(db, rdb)
@@ -105,7 +118,7 @@ func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte, adminToken string,
 	// individual project's data).
 	mux.Handle("GET /metrics", promhttp.HandlerFor(metrics.Registry, promhttp.HandlerOpts{}))
 
-	chatHandler := handleChatCompletions(db, rdb, encryptionKey, logger, defaults)
+	chatHandler := handleChatCompletions(db, rdb, encryptionKey, logger, defaults, opts)
 	mux.Handle("POST /v1/chat/completions", RequireGatewayKey(db, rdb, logger, defaults, chatHandler))
 
 	mux.Handle("GET /admin/projects", RequireAdminToken(adminToken, handleListProjects(db)))

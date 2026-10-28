@@ -8,12 +8,15 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Devpaul-01/llm-gateway/internal/budget"
 	"github.com/Devpaul-01/llm-gateway/internal/concurrency"
 	"github.com/Devpaul-01/llm-gateway/internal/projectsettings"
 	"github.com/Devpaul-01/llm-gateway/internal/providers"
+	"github.com/Devpaul-01/llm-gateway/internal/requestlog"
+	"github.com/Devpaul-01/llm-gateway/internal/respcache"
 	"github.com/Devpaul-01/llm-gateway/internal/stats"
 	"github.com/redis/go-redis/v9"
 )
@@ -31,6 +34,8 @@ type chatCompletionRequest struct {
 	} `json:"stream_options"`
 	ContinueOnFailure bool     `json:"continue_on_failure"`
 	FallbackModels    []string `json:"fallback_models"`
+	// Cache lets a caller opt a single request out of the response cache.
+	Cache *bool `json:"cache"`
 }
 
 type chatMessageJSON struct {
@@ -71,8 +76,23 @@ func parseMessage(m chatMessageJSON) (providers.Message, error) {
 
 var errBadContent = errors.New("content must be a string or an array of parts")
 
-func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, logger *slog.Logger, defaults projectsettings.Defaults) http.HandlerFunc {
+func (o Options) cacheTTL() time.Duration {
+	if o.CacheTTL <= 0 {
+		return time.Hour
+	}
+	return o.CacheTTL
+}
+
+func callerAllowsCache(r *http.Request, bodyFlag *bool) bool {
+	if bodyFlag != nil && !*bodyFlag {
+		return false
+	}
+	return !strings.Contains(strings.ToLower(r.Header.Get("Cache-Control")), "no-cache")
+}
+
+func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, logger *slog.Logger, defaults projectsettings.Defaults, opts Options) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
 		r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 
 		projectID, ok := ProjectIDFromContext(r.Context())
@@ -152,7 +172,35 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 		requestID := providers.NewRequestID()
 		w.Header().Set("X-Gateway-Request-Id", requestID)
 
+		// --- response cache -------------------------------------------------
+		// Checked before concurrency/budget: a hit costs no provider tokens and
+		// holds no provider connection, so it should consume neither.
 		cacheMode := "bypass"
+		var cacheKey, cacheEpoch string
+		if opts.CacheEnabled && rdb != nil && callerAllowsCache(r, reqBody.Cache) && respcacheable(req) {
+			cacheMode = "miss"
+			cacheKey = respcache.Key(req)
+			entry, epoch, err := respcache.Get(r.Context(), rdb, projectID, cacheKey)
+			switch {
+			case err != nil:
+				logger.Error("cache lookup failed", "error", err)
+				cacheMode = "bypass"
+			case entry != nil:
+				cr := newChunkReader(respcache.Replay(entry, requestID, started))
+				var res streamResult
+				if reqBody.Stream {
+					res = streamSSE(w, cr, requestID, "hit", includeUsage, entry.Model)
+				} else {
+					res = writeNonStreamingResponse(w, cr, requestID, "hit")
+				}
+				if res.Summary != nil && db != nil {
+					logCacheHit(db, logger, projectID, gatewayKeyID, reqBody.Stream, res.Summary, time.Since(started))
+				}
+				return
+			default:
+				cacheEpoch = epoch
+			}
+		}
 
 		// --- admission control ---------------------------------------------
 		allowedConcurrent, err := concurrency.Acquire(r.Context(), rdb, projectID, settings.MaxConcurrentStreams)
@@ -217,6 +265,10 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 			return
 		}
 
+		if cacheMode == "miss" {
+			out = respcache.Tap(r.Context(), rdb, logger, projectID, cacheKey, cacheEpoch, opts.cacheTTL(), out)
+		}
+
 		cr := newChunkReader(out)
 		if reqBody.Stream {
 			res = streamSSE(w, cr, requestID, cacheMode, includeUsage, reqBody.Model)
@@ -224,4 +276,32 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 			res = writeNonStreamingResponse(w, cr, requestID, cacheMode)
 		}
 	}
+}
+
+func respcacheable(req providers.Request) bool { return respcache.Cacheable(req) }
+
+func logCacheHit(db *sql.DB, logger *slog.Logger, projectID, gatewayKeyID string, stream bool, s *providers.Summary, total time.Duration) {
+	totalMs := int(total.Milliseconds())
+	in, out := s.Usage.PromptTokens, s.Usage.CompletionTokens
+	entry := requestlog.Entry{
+		RequestID:       s.RequestID,
+		ProjectID:       projectID,
+		GatewayKeyID:    gatewayKeyID,
+		Provider:        s.Provider,
+		Model:           s.Model,
+		Status:          "success",
+		TokensIn:        &in,
+		TokensOut:       &out,
+		TTFTMs:          &totalMs,
+		TotalDurationMs: &totalMs,
+		Stream:          stream,
+		CacheHit:        true,
+		Attempts:        1,
+		ModelsUsed:      []string{s.Provider + ":" + s.Model},
+	}
+	go func() {
+		if err := requestlog.InsertWithTimeout(db, entry); err != nil {
+			logger.Error("failed to write request log", "error", err)
+		}
+	}()
 }
