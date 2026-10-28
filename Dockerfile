@@ -19,6 +19,10 @@ COPY . .
 # possible at all. Architecture Section 16.1.
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/gateway ./cmd/gateway
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/genkey ./cmd/genkey
+# Demo/benchmark helpers: a fake OpenAI-compatible upstream with chaos modes,
+# and a load generator. Tiny static binaries; unused unless you run them.
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/mockprovider ./cmd/mockprovider
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/loadtest ./cmd/loadtest
 
 # --- Final stage -----------------------------------------------------------
 # distroless/static has no shell, no package manager, and no OS utilities
@@ -31,6 +35,8 @@ FROM gcr.io/distroless/static-debian12:nonroot AS final
 WORKDIR /app
 COPY --from=build /out/gateway /app/gateway
 COPY --from=build /out/genkey /app/genkey
+COPY --from=build /out/mockprovider /app/mockprovider
+COPY --from=build /out/loadtest /app/loadtest
 
 # The :nonroot tag already runs as UID 65532; this is kept explicit for
 # clarity (and to fail loudly if a future base-image swap ever drops the
