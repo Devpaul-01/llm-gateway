@@ -134,6 +134,9 @@ func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte, adminToken string,
 	mux.Handle("GET /admin/projects/{id}/credentials", RequireAdminToken(adminToken, handleListCredentials(db)))
 	mux.Handle("DELETE /admin/projects/{id}/credentials/{credentialID}", RequireAdminToken(adminToken, handleRevokeCredential(db, rdb)))
 
+	mux.Handle("DELETE /admin/projects/{id}/cache", RequireAdminToken(adminToken, handleFlushCache(rdb)))
+	mux.Handle("GET /admin/providers", RequireAdminToken(adminToken, handleListProviders()))
+
 	return mux
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/Devpaul-01/llm-gateway/internal/projectsettings"
 	"github.com/Devpaul-01/llm-gateway/internal/providers"
 	"github.com/Devpaul-01/llm-gateway/internal/requestlog"
+	"github.com/Devpaul-01/llm-gateway/internal/respcache"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -469,5 +470,24 @@ func handleCreateProject(db *sql.DB) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(createProjectResponse{ID: projectID})
+	}
+}
+
+// handleFlushCache invalidates every cached response of a project at once.
+func handleFlushCache(rdb *redis.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := respcache.Invalidate(r.Context(), rdb, r.PathValue("id")); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to flush cache")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// handleListProviders lists the provider names a credential can be created for.
+func handleListProviders() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"providers": providers.KnownProviders()})
 	}
 }
