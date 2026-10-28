@@ -449,3 +449,70 @@ func TestE2E_ErrorsAreProperHTTPStatusesInOpenAIShape(t *testing.T) {
 		t.Errorf("empty messages should be 400, got %d", resp.StatusCode)
 	}
 }
+
+func TestE2E_RevokedKeyStopsWorkingImmediately(t *testing.T) {
+	var calls atomic.Int32
+	up := sseUpstream(&calls, []string{"x"}, true)
+	defer up.Close()
+	e := newEnv(t, map[string]string{"groq": up.URL}, Options{})
+
+	body := `{"model":"llama-3.3-70b-versatile","messages":[{"role":"user","content":"hi"}]}`
+	if resp, b := e.post(body); resp.StatusCode != 200 {
+		t.Fatalf("%d %s", resp.StatusCode, b)
+	}
+	// The key is now in the auth cache; revocation must still bite at once.
+	rr, _ := http.NewRequest("DELETE", e.srv.URL+"/admin/projects/"+e.project+"/gateway-keys/"+e.keyID, nil)
+	rr.Header.Set("Authorization", "Bearer admin-token")
+	if resp, err := http.DefaultClient.Do(rr); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("revoke failed: %v %v", err, resp)
+	}
+	if resp, _ := e.post(body); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("revoked key should get 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestE2E_PatchOnlyChangesProvidedFieldsAndTakesEffectImmediately(t *testing.T) {
+	var calls atomic.Int32
+	up := sseUpstream(&calls, []string{"x"}, true)
+	defer up.Close()
+	e := newEnv(t, map[string]string{"groq": up.URL}, Options{})
+
+	patch := func(body string) int {
+		r, _ := http.NewRequest("PATCH", e.srv.URL+"/admin/projects/"+e.project, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer admin-token")
+		resp, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp.StatusCode
+	}
+	if patch(`{"rate_limit_per_min":7,"token_budget":50000}`) != 200 {
+		t.Fatal("patch 1 failed")
+	}
+	if patch(`{"token_budget":60000}`) != 200 { // must NOT reset rate_limit_per_min
+		t.Fatal("patch 2 failed")
+	}
+	var rl, tb sql.NullInt64
+	e.pool.QueryRow(`SELECT rate_limit_per_min, token_budget FROM projects WHERE id = $1`, e.project).Scan(&rl, &tb)
+	if rl.Int64 != 7 || tb.Int64 != 60000 {
+		t.Errorf("partial PATCH clobbered fields: rate=%v budget=%v", rl, tb)
+	}
+	if patch(`{"rate_limit_per_min":null}`) != 200 {
+		t.Fatal("patch 3 failed")
+	}
+	e.pool.QueryRow(`SELECT rate_limit_per_min FROM projects WHERE id = $1`, e.project).Scan(&rl)
+	if rl.Valid {
+		t.Errorf("null should clear the override")
+	}
+	if patch(`{"token_budget":-5}`) != 400 {
+		t.Errorf("negative values must be rejected")
+	}
+
+	// Cached settings are evicted by PATCH: the new rate limit applies to the very next request.
+	patch(`{"rate_limit_per_min":1}`)
+	body := `{"model":"llama-3.3-70b-versatile","messages":[{"role":"user","content":"hi"}]}`
+	e.post(body)
+	if resp, _ := e.post(body); resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("second request within the minute should be rate limited, got %d", resp.StatusCode)
+	}
+}
