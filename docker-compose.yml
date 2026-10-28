@@ -55,6 +55,14 @@ services:
       DEFAULT_RATE_LIMIT_PER_MIN: ${DEFAULT_RATE_LIMIT_PER_MIN:-60}
       DEFAULT_MAX_CONCURRENT_STREAMS: ${DEFAULT_MAX_CONCURRENT_STREAMS:-10}
       DEFAULT_TOKEN_BUDGET: ${DEFAULT_TOKEN_BUDGET:-100000}
+      # Redis response cache (temperature: 0 requests only) and the public,
+      # read-only metrics endpoint that feeds a portfolio/status frontend.
+      CACHE_ENABLED: ${CACHE_ENABLED:-true}
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-3600}
+      PUBLIC_METRICS_ENABLED: ${PUBLIC_METRICS_ENABLED:-false}
+      PUBLIC_METRICS_PROJECT_ID: ${PUBLIC_METRICS_PROJECT_ID:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
     depends_on:
       postgres:
         condition: service_healthy
