@@ -167,6 +167,25 @@ func TestRegistry_AllProvidersBuildAdaptersAndEnvOverrideWorks(t *testing.T) {
 	}
 }
 
+func TestResolveChoice(t *testing.T) {
+	cases := []struct {
+		ref, explicit, wantProvider, wantModel string
+		ok                                     bool
+	}{
+		{"llama-3.3-70b-versatile", "", "groq", "llama-3.3-70b-versatile", true},
+		{"cerebras:llama3.1-8b", "", "cerebras", "llama3.1-8b", true},
+		{"some-new-model", "together", "together", "some-new-model", true},
+		{"meta-llama/llama-3.3-70b-instruct:free", "openrouter", "openrouter", "meta-llama/llama-3.3-70b-instruct:free", true},
+		{"mystery-model", "", "", "", false},
+	}
+	for _, c := range cases {
+		got, ok := resolveChoice(c.ref, c.explicit)
+		if ok != c.ok || got.Provider != c.wantProvider || got.Model != c.wantModel {
+			t.Errorf("resolveChoice(%q,%q) = %+v,%v", c.ref, c.explicit, got, ok)
+		}
+	}
+}
+
 func TestProviderError_HTTPStatus(t *testing.T) {
 	cases := []struct {
 		e    *ProviderError
