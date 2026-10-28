@@ -50,7 +50,7 @@ services:
     environment:
       DATABASE_URL: postgres://gateway:${POSTGRES_PASSWORD:-gateway_dev_password}@postgres:5432/llm_gateway?sslmode=disable
       REDIS_URL: redis://redis:6379/0
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set -- generate one with: docker compose run --rm gateway /app/genkey}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set -- generate one with: openssl rand -hex 32}
       ADMIN_TOKEN: ${ADMIN_TOKEN:?ADMIN_TOKEN must be set -- pick any long random string for local dev}
       DEFAULT_RATE_LIMIT_PER_MIN: ${DEFAULT_RATE_LIMIT_PER_MIN:-60}
       DEFAULT_MAX_CONCURRENT_STREAMS: ${DEFAULT_MAX_CONCURRENT_STREAMS:-10}
