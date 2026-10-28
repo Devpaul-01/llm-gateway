@@ -25,9 +25,16 @@ import (
 // its own health endpoint and exits 0/1 accordingly, giving Docker (and,
 // downstream, a PaaS that respects container health status) a real
 // signal without needing any additional tooling in the final image.
+func healthcheckPort() string {
+	if p := os.Getenv("PORT"); p != "" {
+		return p
+	}
+	return "8080"
+}
+
 func runHealthcheckMode() {
 	client := http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get("http://localhost:8080/healthz")
+	resp, err := client.Get("http://localhost:" + healthcheckPort() + "/healthz")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "healthcheck request failed:", err)
 		os.Exit(1)
@@ -66,6 +73,12 @@ func main() {
 	defer pool.Close()
 	log.Println("connected to database successfully")
 
+	if cfg.AutoMigrate {
+		if err := db.Migrate(ctx, pool, logger); err != nil {
+			log.Fatalf("running migrations: %v", err)
+		}
+	}
+
 	redisClient, err := redisclient.Connect(ctx, cfg.RedisURL)
 	if err != nil {
 		log.Fatalf("connecting to redis: %v", err)
@@ -84,11 +97,21 @@ func main() {
 		TokenBudget:          cfg.DefaultTokenBudget,
 	}
 
-	mux := httpserver.New(pool, redisClient, encryptionKey, cfg.AdminToken, logger, defaults)
+	mux := httpserver.New(pool, redisClient, encryptionKey, cfg.AdminToken, logger, defaults, httpserver.Options{
+		CacheEnabled:           cfg.CacheEnabled,
+		CacheTTL:               time.Duration(cfg.CacheTTLSeconds) * time.Second,
+		PublicMetrics:          cfg.PublicMetrics,
+		PublicMetricsProjectID: cfg.PublicMetricsProjectID,
+		CORSOrigins:            cfg.CORSAllowedOrigins,
+	})
 
+	// No WriteTimeout on purpose: completions stream for as long as the model
+	// talks. ReadHeaderTimeout/IdleTimeout still defend against slow-loris.
 	srv := &http.Server{
-		Addr:    ":8080",
-		Handler: mux,
+		Addr:              ":" + cfg.Port,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	httpserver.RunWithGracefulShutdown(srv, logger)
