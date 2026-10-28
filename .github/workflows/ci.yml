@@ -56,7 +56,9 @@ jobs:
           cache: true
 
       - name: Apply database schema
-        run: psql "$DATABASE_URL" -f internal/db/migrations/000001_init_schema.up.sql
+        run: |
+          psql "$DATABASE_URL" -f internal/db/migrations/000001_init_schema.up.sql
+          psql "$DATABASE_URL" -f internal/db/migrations/000002_observability.up.sql
         env:
           PGPASSWORD: gateway_ci_password
 
