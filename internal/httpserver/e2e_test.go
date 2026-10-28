@@ -416,3 +416,36 @@ func TestE2E_BudgetIsSettledToActualUsage(t *testing.T) {
 		t.Errorf("budget should settle to the 18 tokens actually used, counter = %d", got)
 	}
 }
+
+func TestE2E_ErrorsAreProperHTTPStatusesInOpenAIShape(t *testing.T) {
+	var calls atomic.Int32
+	bad := statusUpstream(&calls, 500)
+	defer bad.Close()
+	e := newEnv(t, map[string]string{"groq": bad.URL}, Options{})
+
+	resp, body := e.post(`{"model":"llama-3.3-70b-versatile","messages":[{"role":"user","content":"hi"}]}`)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("all-upstreams-failed should be 502, got %d", resp.StatusCode)
+	}
+	var out struct {
+		Error struct{ Message, Type string } `json:"error"`
+	}
+	if json.Unmarshal(body, &out) != nil || out.Error.Message == "" || out.Error.Type != "upstream_error" {
+		t.Errorf("error body not OpenAI-shaped: %s", body)
+	}
+
+	// Same for a streaming request: a failure before the first token is a real status, not 200.
+	resp, _ = e.post(`{"model":"llama-3.3-70b-versatile","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("streaming pre-token failure should be 502, got %d", resp.StatusCode)
+	}
+
+	resp, _ = e.post(`{"model":"no-such-model","messages":[{"role":"user","content":"hi"}]}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("unknown model should be 400, got %d", resp.StatusCode)
+	}
+	resp, _ = e.post(`{"model":"llama-3.3-70b-versatile","messages":[]}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("empty messages should be 400, got %d", resp.StatusCode)
+	}
+}
