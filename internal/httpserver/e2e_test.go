@@ -260,3 +260,72 @@ func TestE2E_FailoverIsInvisibleToClientAndRecorded(t *testing.T) {
 		t.Errorf("failing provider not visible in scoreboard: %+v", report.Providers)
 	}
 }
+
+func TestE2E_CacheServesDeterministicRequestsWithoutHittingProvider(t *testing.T) {
+	var calls atomic.Int32
+	up := sseUpstream(&calls, []string{"cached answer"}, true)
+	defer up.Close()
+	e := newEnv(t, map[string]string{"groq": up.URL}, Options{CacheEnabled: true, CacheTTL: time.Minute})
+
+	req := `{"model":"llama-3.3-70b-versatile","temperature":0,"messages":[{"role":"user","content":"deterministic"}]}`
+
+	r1, _ := e.post(req)
+	if r1.Header.Get("X-Gateway-Cache") != "miss" {
+		t.Fatalf("first call should be a miss, got %q", r1.Header.Get("X-Gateway-Cache"))
+	}
+	// Tap stores after the response has been written; give it a moment.
+	time.Sleep(200 * time.Millisecond)
+
+	r2, body := e.post(req)
+	if r2.Header.Get("X-Gateway-Cache") != "hit" || calls.Load() != 1 {
+		t.Fatalf("second call should be a hit with 1 upstream call, got %q / %d calls", r2.Header.Get("X-Gateway-Cache"), calls.Load())
+	}
+	var out struct {
+		Choices []struct {
+			Message map[string]string `json:"message"`
+		} `json:"choices"`
+		Usage map[string]int `json:"usage"`
+	}
+	json.Unmarshal(body, &out)
+	if out.Choices[0].Message["content"] != "cached answer" || out.Usage["total_tokens"] != 18 {
+		t.Errorf("cached replay incomplete: %s", body)
+	}
+
+	// A sampled request (no explicit temperature) must never be cached.
+	e.post(`{"model":"llama-3.3-70b-versatile","messages":[{"role":"user","content":"sampled"}]}`)
+	r3, _ := e.post(`{"model":"llama-3.3-70b-versatile","messages":[{"role":"user","content":"sampled"}]}`)
+	if r3.Header.Get("X-Gateway-Cache") != "bypass" {
+		t.Errorf("sampled request should bypass the cache, got %q", r3.Header.Get("X-Gateway-Cache"))
+	}
+
+	// Per-request opt-out.
+	r4, _ := e.post(req, "Cache-Control", "no-cache")
+	if r4.Header.Get("X-Gateway-Cache") != "bypass" {
+		t.Errorf("no-cache should bypass, got %q", r4.Header.Get("X-Gateway-Cache"))
+	}
+
+	// Admin flush invalidates immediately.
+	fr, _ := http.NewRequest("DELETE", e.srv.URL+"/admin/projects/"+e.project+"/cache", nil)
+	fr.Header.Set("Authorization", "Bearer admin-token")
+	if resp, err := http.DefaultClient.Do(fr); err != nil || resp.StatusCode != 204 {
+		t.Fatalf("flush failed: %v %v", err, resp)
+	}
+	r5, _ := e.post(req)
+	if r5.Header.Get("X-Gateway-Cache") != "miss" {
+		t.Errorf("after flush the entry must be gone, got %q", r5.Header.Get("X-Gateway-Cache"))
+	}
+
+	// The hit shows up in the metrics as saved tokens.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		r, _ := insights.Collect(context.Background(), e.pool, e.rdb, e.project, insights.ParseWindow("1h"))
+		if r != nil && r.Cache.Hits >= 1 {
+			if r.Cache.TokensSaved != 18 {
+				t.Errorf("expected 18 tokens saved, got %d", r.Cache.TokensSaved)
+			}
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Error("cache hit never appeared in metrics")
+}
