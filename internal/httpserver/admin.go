@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -10,11 +11,40 @@ import (
 
 	"github.com/Devpaul-01/llm-gateway/internal/credentials"
 	"github.com/Devpaul-01/llm-gateway/internal/gatewaykeys"
+	"github.com/Devpaul-01/llm-gateway/internal/projectsettings"
 	"github.com/Devpaul-01/llm-gateway/internal/providers"
 	"github.com/Devpaul-01/llm-gateway/internal/requestlog"
 
 	"github.com/redis/go-redis/v9"
 )
+
+// optionalInt distinguishes "field absent" (leave the setting alone) from
+// "field null" (clear the override back to the default) from "field set".
+type optionalInt struct {
+	Set bool
+	Val *int
+}
+
+func (o *optionalInt) UnmarshalJSON(b []byte) error {
+	o.Set = true
+	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
+		o.Val = nil
+		return nil
+	}
+	var v int
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	o.Val = &v
+	return nil
+}
+
+func (o optionalInt) validate(name string) error {
+	if o.Set && o.Val != nil && *o.Val <= 0 {
+		return fmt.Errorf("%s must be a positive integer or null", name)
+	}
+	return nil
+}
 
 type createProjectRequest struct {
 	Name string `json:"name"`
@@ -53,9 +83,9 @@ type projectResponse struct {
 }
 
 type updateProjectSettingsRequest struct {
-	RateLimitPerMin      *int `json:"rate_limit_per_min"`
-	MaxConcurrentStreams *int `json:"max_concurrent_streams"`
-	TokenBudget          *int `json:"token_budget"`
+	RateLimitPerMin      optionalInt `json:"rate_limit_per_min"`
+	MaxConcurrentStreams optionalInt `json:"max_concurrent_streams"`
+	TokenBudget          optionalInt `json:"token_budget"`
 }
 
 // credentialMetadataResponse never includes key material, per
@@ -174,7 +204,7 @@ func handleGetProject(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func handleUpdateProjectSettings(db *sql.DB) http.HandlerFunc {
+func handleUpdateProjectSettings(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectID := r.PathValue("id")
 		if projectID == "" {
@@ -188,15 +218,39 @@ func handleUpdateProjectSettings(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		_, err := db.ExecContext(r.Context(), `
-			UPDATE projects
-			SET rate_limit_per_min = $1, max_concurrent_streams = $2, token_budget = $3
-			WHERE id = $4
-		`, body.RateLimitPerMin, body.MaxConcurrentStreams, body.TokenBudget, projectID)
+		for name, f := range map[string]optionalInt{
+			"rate_limit_per_min":     body.RateLimitPerMin,
+			"max_concurrent_streams": body.MaxConcurrentStreams,
+			"token_budget":           body.TokenBudget,
+		} {
+			if err := f.validate(name); err != nil {
+				writeJSONError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+				return
+			}
+		}
+
+		// PATCH semantics: only fields present in the body change. A field set
+		// to null clears the override (falls back to the server default).
+		res, err := db.ExecContext(r.Context(), `
+			UPDATE projects SET
+			  rate_limit_per_min     = CASE WHEN $1::boolean THEN $2::integer ELSE rate_limit_per_min END,
+			  max_concurrent_streams = CASE WHEN $3::boolean THEN $4::integer ELSE max_concurrent_streams END,
+			  token_budget           = CASE WHEN $5::boolean THEN $6::integer ELSE token_budget END
+			WHERE id = $7
+		`, body.RateLimitPerMin.Set, body.RateLimitPerMin.Val,
+			body.MaxConcurrentStreams.Set, body.MaxConcurrentStreams.Val,
+			body.TokenBudget.Set, body.TokenBudget.Val, projectID)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to update project settings")
 			return
 		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			writeJSONError(w, http.StatusNotFound, "not_found_error", "project not found")
+			return
+		}
+
+		// Settings are cached; evict so the change applies on the very next request.
+		projectsettings.Invalidate(r.Context(), rdb, projectID)
 
 		w.WriteHeader(http.StatusOK)
 	}

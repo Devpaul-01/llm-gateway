@@ -124,7 +124,7 @@ func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte, adminToken string,
 	mux.Handle("GET /admin/projects", RequireAdminToken(adminToken, handleListProjects(db)))
 	mux.Handle("GET /admin/projects/{id}", RequireAdminToken(adminToken, handleGetProject(db)))
 	mux.Handle("POST /admin/projects", RequireAdminToken(adminToken, limitBody(adminBodyLimit, handleCreateProject(db))))
-	mux.Handle("PATCH /admin/projects/{id}", RequireAdminToken(adminToken, limitBody(adminBodyLimit, handleUpdateProjectSettings(db))))
+	mux.Handle("PATCH /admin/projects/{id}", RequireAdminToken(adminToken, limitBody(adminBodyLimit, handleUpdateProjectSettings(db, rdb))))
 
 	mux.Handle("POST /admin/gateway-keys", RequireAdminToken(adminToken, limitBody(adminBodyLimit, handleCreateGatewayKey(db))))
 	mux.Handle("GET /admin/projects/{id}/gateway-keys", RequireAdminToken(adminToken, handleListGatewayKeys(db)))
