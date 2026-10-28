@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"encoding/hex"
@@ -328,4 +329,90 @@ func TestE2E_CacheServesDeterministicRequestsWithoutHittingProvider(t *testing.T
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Error("cache hit never appeared in metrics")
+}
+
+func TestE2E_StreamingIsOpenAIShapedAndCarriesUsage(t *testing.T) {
+	var calls atomic.Int32
+	up := sseUpstream(&calls, []string{"a", "b"}, true)
+	defer up.Close()
+	e := newEnv(t, map[string]string{"groq": up.URL}, Options{})
+
+	resp, _ := func() (*http.Response, []byte) {
+		req, _ := http.NewRequest("POST", e.srv.URL+"/v1/chat/completions", strings.NewReader(
+			`{"model":"llama-3.3-70b-versatile","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"hi"}]}`))
+		req.Header.Set("Authorization", "Bearer "+e.key)
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r, nil
+	}()
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("content type %q", ct)
+	}
+
+	var content strings.Builder
+	var sawUsage, sawDone, sawRole bool
+	sc := bufio.NewScanner(resp.Body)
+	for sc.Scan() {
+		line := sc.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		p := strings.TrimPrefix(line, "data: ")
+		if p == "[DONE]" {
+			sawDone = true
+			break
+		}
+		var ch struct {
+			Object  string `json:"object"`
+			Choices []struct {
+				Delta map[string]string `json:"delta"`
+			} `json:"choices"`
+			Usage   map[string]int         `json:"usage"`
+			Gateway map[string]interface{} `json:"gateway"`
+		}
+		if err := json.Unmarshal([]byte(p), &ch); err != nil {
+			t.Fatalf("bad chunk %q: %v", p, err)
+		}
+		if ch.Object != "chat.completion.chunk" {
+			t.Errorf("object = %q", ch.Object)
+		}
+		for _, c := range ch.Choices {
+			content.WriteString(c.Delta["content"])
+			if c.Delta["role"] == "assistant" {
+				sawRole = true
+			}
+		}
+		if ch.Usage != nil && ch.Usage["total_tokens"] == 18 {
+			sawUsage = true
+			if ch.Gateway["provider"] != "groq" {
+				t.Errorf("usage chunk missing gateway meta: %v", ch.Gateway)
+			}
+		}
+	}
+	if content.String() != "ab" || !sawUsage || !sawDone || !sawRole {
+		t.Errorf("stream incomplete: content=%q usage=%v done=%v role=%v", content.String(), sawUsage, sawDone, sawRole)
+	}
+}
+
+func TestE2E_BudgetIsSettledToActualUsage(t *testing.T) {
+	var calls atomic.Int32
+	up := sseUpstream(&calls, []string{"short"}, true)
+	defer up.Close()
+	e := newEnv(t, map[string]string{"groq": up.URL}, Options{})
+
+	// max_tokens 4000 reserves ~4000, but the real usage is 18 tokens.
+	resp, body := e.post(`{"model":"llama-3.3-70b-versatile","max_tokens":4000,"messages":[{"role":"user","content":"hi"}]}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("%d %s", resp.StatusCode, body)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && e.budgetCounter() != 18 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := e.budgetCounter(); got != 18 {
+		t.Errorf("budget should settle to the 18 tokens actually used, counter = %d", got)
+	}
 }
