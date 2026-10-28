@@ -14,10 +14,12 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Devpaul-01/llm-gateway/internal/credentials"
 	"github.com/Devpaul-01/llm-gateway/internal/db"
 	"github.com/Devpaul-01/llm-gateway/internal/gatewaykeys"
+	"github.com/Devpaul-01/llm-gateway/internal/insights"
 	"github.com/Devpaul-01/llm-gateway/internal/projectsettings"
 	"github.com/Devpaul-01/llm-gateway/internal/redisclient"
 	"github.com/redis/go-redis/v9"
@@ -198,5 +200,63 @@ func TestE2E_UsageIsEstimatedWhenUpstreamReportsNone(t *testing.T) {
 	json.Unmarshal(body, &out)
 	if out.Usage["completion_tokens"] == 0 || out.Gateway["usage_estimated"] != true {
 		t.Errorf("expected estimated usage flagged as such: %s", body)
+	}
+}
+
+func TestE2E_FailoverIsInvisibleToClientAndRecorded(t *testing.T) {
+	var badCalls, goodCalls atomic.Int32
+	bad := statusUpstream(&badCalls, 429)
+	good := sseUpstream(&goodCalls, []string{"rescued"}, true)
+	defer bad.Close()
+	defer good.Close()
+	e := newEnv(t, map[string]string{"groq": bad.URL, "mistral": good.URL}, Options{})
+
+	resp, body := e.post(`{"model":"llama-3.3-70b-versatile","fallback_models":["mistral-large-latest"],"messages":[{"role":"user","content":"hi"}]}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected failover to succeed, got %d: %s", resp.StatusCode, body)
+	}
+	var out struct {
+		Gateway map[string]interface{} `json:"gateway"`
+	}
+	json.Unmarshal(body, &out)
+	if out.Gateway["provider"] != "mistral" || out.Gateway["failovers"].(float64) != 1 || out.Gateway["attempts"].(float64) != 2 {
+		t.Errorf("gateway meta should show the rescue: %v", out.Gateway)
+	}
+
+	// The request log + counters should now tell the same story to the dashboard.
+	var report *insights.Report
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		r, err := insights.Collect(context.Background(), e.pool, e.rdb, e.project, insights.ParseWindow("1h"))
+		if err != nil {
+			t.Fatalf("metrics: %v", err)
+		}
+		if r.Reliability.Requests >= 1 && r.Reliability.UpstreamAttemptsFail >= 1 {
+			report = r
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if report == nil {
+		t.Fatal("metrics never reflected the request")
+	}
+	rel := report.Reliability
+	if rel.RescuedByFailover != 1 || rel.RescuedRateLimits != 1 || rel.RescueRate == nil || *rel.RescueRate != 1 {
+		t.Errorf("rescue not recorded: %+v", rel)
+	}
+	if rel.SuccessRate == nil || *rel.SuccessRate != 1 {
+		t.Errorf("success rate should be 100%%: %+v", rel)
+	}
+	if len(report.Timeseries) == 0 || len(report.Recent) != 1 {
+		t.Errorf("timeseries/recent missing: %d points, %d recent", len(report.Timeseries), len(report.Recent))
+	}
+	var sawBad bool
+	for _, p := range report.Providers {
+		if p.Provider == "groq" && p.AttemptsFailed == 1 && p.FailuresBy["key_fault"] == 1 {
+			sawBad = true
+		}
+	}
+	if !sawBad {
+		t.Errorf("failing provider not visible in scoreboard: %+v", report.Providers)
 	}
 }
