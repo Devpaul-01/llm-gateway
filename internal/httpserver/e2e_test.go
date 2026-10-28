@@ -558,3 +558,52 @@ func TestE2E_PublicMetricsEndpoint(t *testing.T) {
 		t.Errorf("CORS leaked to an unlisted origin")
 	}
 }
+
+func TestE2E_CircuitBreakerRoutesAroundADownProvider(t *testing.T) {
+	var badCalls, goodCalls atomic.Int32
+	bad := statusUpstream(&badCalls, 503)
+	good := sseUpstream(&goodCalls, []string{"ok"}, true)
+	defer bad.Close()
+	defer good.Close()
+	e := newEnv(t, map[string]string{"groq": bad.URL, "mistral": good.URL}, Options{})
+	// Breaker state is global per provider name; make sure earlier tests don't leak into this one.
+	e.rdb.Del(context.Background(), "breaker:groq", "breaker:mistral")
+	t.Cleanup(func() { e.rdb.Del(context.Background(), "breaker:groq", "breaker:mistral") })
+
+	body := `{"model":"llama-3.3-70b-versatile","fallback_models":["mistral-large-latest"],"messages":[{"role":"user","content":"hi"}]}`
+	attemptsOf := func() int {
+		resp, b := e.post(body)
+		if resp.StatusCode != 200 {
+			t.Fatalf("request failed: %d %s", resp.StatusCode, b)
+		}
+		var out struct {
+			Gateway struct{ Attempts int } `json:"gateway"`
+		}
+		json.Unmarshal(b, &out)
+		return out.Gateway.Attempts
+	}
+
+	for i := 0; i < 5; i++ { // each one tries the bad provider first, then fails over
+		if a := attemptsOf(); a != 2 {
+			t.Fatalf("request %d: expected 2 attempts while the breaker is still closed, got %d", i, a)
+		}
+	}
+	time.Sleep(100 * time.Millisecond) // breaker writes are synchronous on failure, small grace for the success-side DEL
+	before := badCalls.Load()
+	if a := attemptsOf(); a != 1 {
+		t.Errorf("breaker should be open: expected the healthy provider to be tried first (1 attempt), got %d", a)
+	}
+	if badCalls.Load() != before {
+		t.Errorf("the down provider should not have been contacted while its breaker is open")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		r, _ := insights.Collect(context.Background(), e.pool, e.rdb, e.project, insights.ParseWindow("1h"))
+		if r != nil && r.Reliability.CircuitReroutes >= 1 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Error("circuit reroute never appeared in metrics")
+}
