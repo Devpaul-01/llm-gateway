@@ -6,26 +6,28 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
+
+const (
+	positiveCacheTTL = 5 * time.Minute
+	// Unknown keys are cached briefly too, so a client spamming bad keys can't
+	// turn every attempt into a database query.
+	negativeCacheTTL = 15 * time.Second
+	negativeMarker   = "-"
+)
+
+func cacheKey(hash string) string { return "gwkey:" + hash }
 
 type GatewayKey struct {
 	ID        string
 	ProjectID string
 	Label     string
 	Status    string
-}
-
-// GatewayKeyMetadata is a gateway key summary with no hash/plaintext
-// included, suitable for an admin listing endpoint.
-type GatewayKeyMetadata struct {
-	ID        string
-	ProjectID string
-	KeyPrefix string
-	Label     string
-	Status    string
-	CreatedAt time.Time
 }
 
 func GenerateKey() (plaintext string, err error) {
@@ -82,6 +84,59 @@ func LookupByPlaintext(ctx context.Context, db *sql.DB, plaintext string) (*Gate
 	return &gk, nil
 }
 
+// LookupCached is LookupByPlaintext with a Redis read-through cache in front.
+// Auth runs on every request, so this removes a database round trip from the
+// hot path. Revoke and Insert invalidate the entry, so revocation is immediate.
+func LookupCached(ctx context.Context, db *sql.DB, rdb *redis.Client, plaintext string) (*GatewayKey, error) {
+	if rdb == nil {
+		return LookupByPlaintext(ctx, db, plaintext)
+	}
+	hash := hashKey(plaintext)
+	key := cacheKey(hash)
+
+	if cached, err := rdb.Get(ctx, key).Result(); err == nil {
+		if cached == negativeMarker {
+			return nil, nil
+		}
+		var gk GatewayKey
+		if json.Unmarshal([]byte(cached), &gk) == nil {
+			return &gk, nil
+		}
+	}
+
+	gk, err := LookupByPlaintext(ctx, db, plaintext)
+	if err != nil {
+		return nil, err
+	}
+	if gk == nil {
+		rdb.Set(ctx, key, negativeMarker, negativeCacheTTL)
+		return nil, nil
+	}
+	if data, err := json.Marshal(gk); err == nil {
+		rdb.Set(ctx, key, data, positiveCacheTTL)
+	}
+	return gk, nil
+}
+
+// InvalidatePlaintext drops any cached entry (including a negative one) for a key.
+func InvalidatePlaintext(ctx context.Context, rdb *redis.Client, plaintext string) {
+	if rdb == nil {
+		return
+	}
+	rdb.Del(ctx, cacheKey(hashKey(plaintext)))
+}
+
+// GatewayKeyMetadata is a gateway key summary with no hash/plaintext
+// included, suitable for an admin listing endpoint.
+type GatewayKeyMetadata struct {
+	ID        string
+	ProjectID string
+	KeyPrefix string
+	Label     string
+	Status    string
+	CreatedAt time.Time
+}
+
 // ListByProject returns metadata (hash never included) for every gateway
 // key belonging to a project, newest first.
 func ListByProject(ctx context.Context, db *sql.DB, projectID string) ([]GatewayKeyMetadata, error) {
@@ -108,18 +163,13 @@ func ListByProject(ctx context.Context, db *sql.DB, projectID string) ([]Gateway
 		}
 		results = append(results, m)
 	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return results, nil
+	return results, rows.Err()
 }
 
-// Revoke marks a gateway key as revoked. Because LookupByPlaintext only
-// matches status = 'active', a revoked key is rejected on the very next
-// request -- this is what makes ADR-04's "immediate revocation" claim
-// actually true via the API, rather than only true via direct DB access.
+// Revoke marks a gateway key as revoked and returns rows affected. Because
+// LookupByPlaintext only matches status = 'active', the database is
+// immediately authoritative. Callers that run with the auth cache enabled
+// should use RevokeAndInvalidate so the cached entry is evicted too.
 func Revoke(ctx context.Context, db *sql.DB, projectID, keyID string) (int64, error) {
 	res, err := db.ExecContext(ctx, `
 		UPDATE gateway_api_keys
@@ -130,4 +180,26 @@ func Revoke(ctx context.Context, db *sql.DB, projectID, keyID string) (int64, er
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// RevokeAndInvalidate revokes a key and evicts it from the Redis auth cache,
+// so revocation takes effect on the very next request rather than after the
+// cache TTL. Returns rows affected.
+func RevokeAndInvalidate(ctx context.Context, db *sql.DB, rdb *redis.Client, projectID, keyID string) (int64, error) {
+	var hash string
+	err := db.QueryRowContext(ctx, `
+		UPDATE gateway_api_keys SET status = 'revoked'
+		WHERE id = $1 AND project_id = $2 AND status != 'revoked'
+		RETURNING key_hash
+	`, keyID, projectID).Scan(&hash)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if rdb != nil {
+		rdb.Del(ctx, cacheKey(hash))
+	}
+	return 1, nil
 }
