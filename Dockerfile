@@ -17,7 +17,7 @@ COPY . .
 # the target image's libc, which is what makes running it on a
 # scratch/distroless base (no shell, no package manager, no OS utilities)
 # possible at all. Architecture Section 16.1.
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/gateway ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/gateway ./cmd/gateway
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/genkey ./cmd/genkey
 
 # --- Final stage -----------------------------------------------------------
