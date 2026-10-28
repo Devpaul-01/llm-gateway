@@ -516,3 +516,45 @@ func TestE2E_PatchOnlyChangesProvidedFieldsAndTakesEffectImmediately(t *testing.
 		t.Errorf("second request within the minute should be rate limited, got %d", resp.StatusCode)
 	}
 }
+
+func TestE2E_PublicMetricsEndpoint(t *testing.T) {
+	var calls atomic.Int32
+	up := sseUpstream(&calls, []string{"x"}, true)
+	defer up.Close()
+	e := newEnv(t, map[string]string{"groq": up.URL}, Options{PublicMetrics: true, CORSOrigins: []string{"https://portfolio.example"}})
+	e.post(`{"model":"llama-3.3-70b-versatile","messages":[{"role":"user","content":"hi"}]}`)
+	time.Sleep(300 * time.Millisecond)
+
+	req, _ := http.NewRequest("GET", e.srv.URL+"/public/metrics?window=1h", nil)
+	req.Header.Set("Origin", "https://portfolio.example")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 || resp.Header.Get("Access-Control-Allow-Origin") != "https://portfolio.example" {
+		t.Fatalf("status %d, CORS %q", resp.StatusCode, resp.Header.Get("Access-Control-Allow-Origin"))
+	}
+	b, _ := io.ReadAll(resp.Body)
+	for _, forbidden := range []string{e.project, e.keyID, "sk-groq"} {
+		if strings.Contains(string(b), forbidden) {
+			t.Errorf("public metrics leaked %q", forbidden)
+		}
+	}
+	var rep map[string]interface{}
+	if json.Unmarshal(b, &rep) != nil || rep["reliability"] == nil || rep["timeseries"] == nil {
+		t.Errorf("unexpected payload: %.200s", b)
+	}
+
+	// Unlisted origins get no CORS header.
+	req2, _ := http.NewRequest("GET", e.srv.URL+"/public/metrics", nil)
+	req2.Header.Set("Origin", "https://evil.example")
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.Header.Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("CORS leaked to an unlisted origin")
+	}
+}
