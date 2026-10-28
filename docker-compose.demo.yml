@@ -1,0 +1,22 @@
+# Adds two fake providers so you can watch caching and failover with no API keys:
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
+# then see README "Try the failover demo".
+services:
+  mock-groq:
+    build: .
+    entrypoint: ["/app/mockprovider", "-addr", ":9001", "-name", "groq-mock"]
+    ports: ["9001:9001"]
+
+  mock-mistral:
+    build: .
+    entrypoint: ["/app/mockprovider", "-addr", ":9002", "-name", "mistral-mock"]
+    ports: ["9002:9002"]
+
+  gateway:
+    depends_on: [mock-groq, mock-mistral]
+    environment:
+      PROVIDER_GROQ_BASE_URL: http://mock-groq:9001/v1
+      PROVIDER_MISTRAL_BASE_URL: http://mock-mistral:9002/v1
+      DEFAULT_RATE_LIMIT_PER_MIN: "100000"
+      DEFAULT_MAX_CONCURRENT_STREAMS: "200"
+      DEFAULT_TOKEN_BUDGET: "100000000"
