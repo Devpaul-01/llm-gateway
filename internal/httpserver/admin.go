@@ -3,11 +3,14 @@ package httpserver
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Devpaul-01/llm-gateway/internal/credentials"
 	"github.com/Devpaul-01/llm-gateway/internal/gatewaykeys"
+	"github.com/Devpaul-01/llm-gateway/internal/providers"
 	"github.com/Devpaul-01/llm-gateway/internal/requestlog"
 
 	"github.com/redis/go-redis/v9"
@@ -208,6 +211,12 @@ func handleCreateCredential(db *sql.DB, rdb *redis.Client, encryptionKey []byte)
 		}
 		if body.ProjectID == "" || body.Provider == "" || body.APIKey == "" {
 			writeJSONError(w, http.StatusBadRequest, "invalid_request_error", "project_id, provider, and api_key are required")
+			return
+		}
+
+		if !providers.IsKnownProvider(body.Provider) {
+			writeJSONError(w, http.StatusBadRequest, "invalid_request_error",
+				fmt.Sprintf("unknown provider %q, supported: %s", body.Provider, strings.Join(providers.KnownProviders(), ", ")))
 			return
 		}
 
