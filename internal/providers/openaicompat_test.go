@@ -205,3 +205,64 @@ func TestProviderError_HTTPStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestEngine_AttachesUsageAndSummary(t *testing.T) {
+	u := &Usage{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5}
+	fp := &FakeProvider{Chunks: []Chunk{{Content: "hi"}, {Done: true, Usage: u, FinishReason: "stop"}}}
+	out, _ := handleChatWithCandidates(context.Background(), Request{}, []Candidate{{Adapter: fp, ProviderName: "p", Model: "m", Label: "p"}}, requestLogContext{}, testLogger, nil)
+
+	var final Chunk
+	for c := range out {
+		final = c
+	}
+	if final.Summary == nil || final.Summary.Usage.TotalTokens != 5 || final.Summary.UsageEstimated || final.Summary.Attempts != 1 || final.Summary.Provider != "p" {
+		t.Errorf("summary wrong: %+v", final.Summary)
+	}
+}
+
+func TestEngine_EstimatesUsageWhenUpstreamGivesNone(t *testing.T) {
+	fp := &FakeProvider{Chunks: []Chunk{{Content: "twelve chars"}, {Done: true}}}
+	out, _ := handleChatWithCandidates(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hello there"}}}, []Candidate{{Adapter: fp, ProviderName: "p", Model: "m"}}, requestLogContext{}, testLogger, nil)
+	var final Chunk
+	for c := range out {
+		final = c
+	}
+	if final.Summary == nil || !final.Summary.UsageEstimated || final.Summary.Usage.CompletionTokens != 3 || final.Summary.Usage.TotalTokens == 0 {
+		t.Errorf("expected flagged estimate: %+v", final.Summary)
+	}
+}
+
+func TestEngine_PrematureChannelCloseIsAFailureNotASilentSuccess(t *testing.T) {
+	cut := &FakeProvider{Chunks: []Chunk{{Content: "partial"}}} // channel closes, no Done, no Err
+	ok := &FakeProvider{Chunks: []Chunk{{Content: "other"}, {Done: true}}}
+	out, _ := handleChatWithCandidates(context.Background(), Request{}, []Candidate{
+		{Adapter: cut, ProviderName: "a", Model: "m"}, {Adapter: ok, ProviderName: "b", Model: "m"},
+	}, requestLogContext{}, testLogger, nil)
+
+	var last Chunk
+	var content string
+	for c := range out {
+		content += c.Content
+		last = c
+	}
+	// Without ContinueOnFailure a truncated stream must surface as an error and
+	// must NOT be completed by splicing the next candidate's answer.
+	if last.Err == nil || strings.Contains(content, "other") {
+		t.Errorf("truncated stream must end in an error, got content=%q last=%+v", content, last)
+	}
+}
+
+func TestEngine_CountsFailoversAndFirstError(t *testing.T) {
+	bad := &FakeProvider{Err: &ProviderError{Category: KeyFault, Cause: fmt.Errorf("429")}}
+	good := &FakeProvider{Chunks: []Chunk{{Content: "x"}, {Done: true}}}
+	out, _ := handleChatWithCandidates(context.Background(), Request{}, []Candidate{
+		{Adapter: bad, ProviderName: "a", Model: "m"}, {Adapter: good, ProviderName: "b", Model: "m"},
+	}, requestLogContext{}, testLogger, nil)
+	var final Chunk
+	for c := range out {
+		final = c
+	}
+	if final.Summary == nil || final.Summary.Attempts != 2 || final.Summary.Failovers != 1 || final.Summary.Provider != "b" {
+		t.Errorf("failover not counted: %+v", final.Summary)
+	}
+}

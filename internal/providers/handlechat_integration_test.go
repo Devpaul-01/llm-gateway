@@ -88,7 +88,7 @@ func TestHandleChat_ResolutionFailureStillWritesRequestLog(t *testing.T) {
 	// Deliberately no credentials inserted for this project -- resolveCandidates
 	// should fail with "no usable candidates for request" before any
 	// candidate is ever tried.
-	_, err = HandleChat(ctx, pool, projectID, gatewayKeyID, encryptionKey, Request{
+	_, err = HandleChat(ctx, pool, projectID, gatewayKeyID, "", encryptionKey, Request{
 		Model:    "openai/gpt-oss-120b",
 		Messages: []Message{{Role: "user", Content: "hello"}},
 	}, newLogger, nil)
@@ -152,7 +152,7 @@ func TestHandleChat_EndToEnd_RealGroq(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inserting test credential: %v", err)
 	}
-	out, err := HandleChat(ctx, pool, projectID, "", encryptionKey, Request{
+	out, err := HandleChat(ctx, pool, projectID, "", "", encryptionKey, Request{
 		Messages:    []Message{{Role: "user", Content: "Say the single word: hello"}},
 		MaxTokens:   500,
 		Temperature: 0.0,

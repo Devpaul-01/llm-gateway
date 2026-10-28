@@ -208,7 +208,7 @@ func handleChatCompletions(db *sql.DB, rdb *redis.Client, encryptionKey []byte, 
 		// Finding B-3's fix. Without threading maxTokens through here,
 		// handler.go would have no way to know what was reserved and
 		// therefore nothing to refund.
-		out, err := providers.HandleChatWithBudget(r.Context(), db, projectID, gatewayKeyID, encryptionKey, req, logger, rdb, maxTokens)
+		out, err := providers.HandleChat(r.Context(), db, projectID, gatewayKeyID, "", encryptionKey, req, logger, rdb)
 		if err != nil {
 			logger.Error("chat handling failed", "project", projectID, "error", err)
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", err.Error())
