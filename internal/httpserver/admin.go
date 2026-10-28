@@ -9,6 +9,8 @@ import (
 	"github.com/Devpaul-01/llm-gateway/internal/credentials"
 	"github.com/Devpaul-01/llm-gateway/internal/gatewaykeys"
 	"github.com/Devpaul-01/llm-gateway/internal/requestlog"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type createProjectRequest struct {
@@ -197,7 +199,7 @@ func handleUpdateProjectSettings(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func handleCreateCredential(db *sql.DB, encryptionKey []byte) http.HandlerFunc {
+func handleCreateCredential(db *sql.DB, rdb *redis.Client, encryptionKey []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body createCredentialRequest
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -214,6 +216,7 @@ func handleCreateCredential(db *sql.DB, encryptionKey []byte) http.HandlerFunc {
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to create credential")
 			return
 		}
+		credentials.Invalidate(r.Context(), rdb, body.ProjectID, body.Provider)
 
 		w.WriteHeader(http.StatusCreated)
 	}
@@ -267,7 +270,7 @@ func handleListCredentials(db *sql.DB) http.HandlerFunc {
 // revocation" justification for not storing a reversible secret: a
 // revoked credential is excluded from GetByProjectAndProvider on the very
 // next candidate resolution.
-func handleRevokeCredential(db *sql.DB) http.HandlerFunc {
+func handleRevokeCredential(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectID := r.PathValue("id")
 		credentialID := r.PathValue("credentialID")
@@ -276,7 +279,7 @@ func handleRevokeCredential(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		affected, err := credentials.Revoke(r.Context(), db, projectID, credentialID)
+		affected, err := credentials.RevokeAndInvalidate(r.Context(), db, rdb, projectID, credentialID)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to revoke credential")
 			return
@@ -356,7 +359,7 @@ func handleListGatewayKeys(db *sql.DB) http.HandlerFunc {
 // After this call, LookupByPlaintext stops matching the key (it filters
 // on status = 'active'), so RequireGatewayKey rejects the very next
 // request made with it.
-func handleRevokeGatewayKey(db *sql.DB) http.HandlerFunc {
+func handleRevokeGatewayKey(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectID := r.PathValue("id")
 		keyID := r.PathValue("keyID")
@@ -365,7 +368,7 @@ func handleRevokeGatewayKey(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		affected, err := gatewaykeys.Revoke(r.Context(), db, projectID, keyID)
+		affected, err := gatewaykeys.RevokeAndInvalidate(r.Context(), db, rdb, projectID, keyID)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "internal_error", "failed to revoke gateway key")
 			return

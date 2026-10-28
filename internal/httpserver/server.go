@@ -128,11 +128,11 @@ func New(db *sql.DB, rdb *redis.Client, encryptionKey []byte, adminToken string,
 
 	mux.Handle("POST /admin/gateway-keys", RequireAdminToken(adminToken, limitBody(adminBodyLimit, handleCreateGatewayKey(db))))
 	mux.Handle("GET /admin/projects/{id}/gateway-keys", RequireAdminToken(adminToken, handleListGatewayKeys(db)))
-	mux.Handle("DELETE /admin/projects/{id}/gateway-keys/{keyID}", RequireAdminToken(adminToken, handleRevokeGatewayKey(db)))
+	mux.Handle("DELETE /admin/projects/{id}/gateway-keys/{keyID}", RequireAdminToken(adminToken, handleRevokeGatewayKey(db, rdb)))
 
-	mux.Handle("POST /admin/credentials", RequireAdminToken(adminToken, limitBody(adminBodyLimit, handleCreateCredential(db, encryptionKey))))
+	mux.Handle("POST /admin/credentials", RequireAdminToken(adminToken, limitBody(adminBodyLimit, handleCreateCredential(db, rdb, encryptionKey))))
 	mux.Handle("GET /admin/projects/{id}/credentials", RequireAdminToken(adminToken, handleListCredentials(db)))
-	mux.Handle("DELETE /admin/projects/{id}/credentials/{credentialID}", RequireAdminToken(adminToken, handleRevokeCredential(db)))
+	mux.Handle("DELETE /admin/projects/{id}/credentials/{credentialID}", RequireAdminToken(adminToken, handleRevokeCredential(db, rdb)))
 
 	return mux
 }
