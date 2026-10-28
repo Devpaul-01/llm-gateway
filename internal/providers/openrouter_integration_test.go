@@ -16,10 +16,7 @@ func TestOpenRouterProvider_LiveChatCompletion(t *testing.T) {
 		t.Skip("OPENROUTER_API_KEY not set, skipping live OpenRouter integration test")
 	}
 
-	op := &OpenRouterProvider{
-		APIKey:  apiKey,
-		BaseURL: "https://openrouter.ai/api/v1",
-	}
+	op := NewOpenAICompat("openrouter", apiKey, "https://openrouter.ai/api/v1")
 
 	ch, err := op.Chat(context.Background(), Request{
 		Model:       "meta-llama/llama-3.1-8b-instruct",

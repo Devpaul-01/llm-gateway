@@ -49,17 +49,6 @@ var visionCapableModels = map[string]bool{
 	"mistral-large-latest":                      true,
 }
 
-// providerBaseURLs centralizes the base URL each provider's adapter is
-// constructed with, so resolveCandidates and the (now-wired) discovery
-// refresh path share one source of truth instead of baseURLs being
-// duplicated between newProviderAdapter and a discovery-specific lookup.
-var providerBaseURLs = map[string]string{
-	"groq":       "https://api.groq.com/openai/v1",
-	"mistral":    "https://api.mistral.ai/v1",
-	"openrouter": "https://openrouter.ai/api/v1",
-	"gemini":     "https://generativelanguage.googleapis.com/v1beta/openai",
-}
-
 func isVisionCapable(model string) bool {
 	return visionCapableModels[model]
 }
@@ -86,21 +75,6 @@ func filterVisionCapable(candidates []Candidate, logger *slog.Logger) []Candidat
 func inferProviderForModel(model string) (string, bool) {
 	provider, found := modelToProvider[model]
 	return provider, found
-}
-
-func newProviderAdapter(provider, apiKey string) Provider {
-	switch provider {
-	case "groq":
-		return &GroqProvider{APIKey: apiKey, BaseURL: providerBaseURLs["groq"]}
-	case "mistral":
-		return &MistralProvider{APIKey: apiKey, BaseURL: providerBaseURLs["mistral"]}
-	case "openrouter":
-		return &OpenRouterProvider{APIKey: apiKey, BaseURL: providerBaseURLs["openrouter"]}
-	case "gemini":
-		return &GeminiProvider{APIKey: apiKey, BaseURL: providerBaseURLs["gemini"]}
-	default:
-		return nil
-	}
 }
 
 // refreshDiscoveryForTierMode calls discovery.GetModels for a provider
@@ -131,11 +105,11 @@ func refreshDiscoveryForTierMode(ctx context.Context, rdb *redis.Client, provide
 	if rdb == nil || apiKey == "" {
 		return
 	}
-	baseURL, ok := providerBaseURLs[provider]
+	spec, ok := providerRegistry[provider]
 	if !ok {
 		return
 	}
-	discovery.GetModels(ctx, rdb, provider, baseURL, apiKey, fallback)
+	discovery.GetModels(ctx, rdb, provider, spec.BaseURL, apiKey, fallback)
 }
 
 func resolveCandidates(ctx context.Context, db *sql.DB, projectID string, encryptionKey []byte, req Request, logger *slog.Logger, rdb *redis.Client) ([]Candidate, error) {
