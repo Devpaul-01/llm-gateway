@@ -1,0 +1,19 @@
+.reveal-key__warning {
+  font-size: var(--text-sm);
+  color: var(--warn);
+  margin: 0;
+}
+
+.reveal-key__value {
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  word-break: break-all;
+}
+
+.reveal-key__value code {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text);
+}

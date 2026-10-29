@@ -1,0 +1,24 @@
+.settings-form__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.settings-form__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.settings-form__saved {
+  color: var(--accent);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-3);
+}
+
+@media (max-width: 700px) {
+  .settings-form__grid {
+    grid-template-columns: 1fr;
+  }
+}

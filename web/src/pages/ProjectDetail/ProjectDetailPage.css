@@ -1,0 +1,15 @@
+.project-detail__back {
+  display: inline-block;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-4);
+}
+
+.project-detail__back:hover {
+  color: var(--text);
+}
+
+.project-detail__section {
+  margin-bottom: var(--space-5);
+}
