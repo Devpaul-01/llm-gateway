@@ -23,15 +23,23 @@
   --error: #e85d5d;
   --error-dim: #8a3535;
 
-  /* Provider/category palette for charts — distinct, desaturated hues */
-  --chart-1: #4fd1c5;
-  --chart-2: #6c8ef2;
-  --chart-3: #f0b429;
-  --chart-4: #c77dff;
-  --chart-5: #5fd98a;
-  --chart-6: #e85d5d;
-  --chart-7: #ff9f6b;
-  --chart-8: #8b98ab;
+  /* Provider/category palette for charts. Validated categorical order
+     (dark mode) from the dataviz skill's reference palette — passes
+     lightness band, chroma floor, CVD separation (worst adjacent ΔE 8.4),
+     normal-vision floor (worst adjacent ΔE 19.3), and >=3:1 contrast vs
+     this surface. Do not reorder or recolor without re-running
+     scripts/validate_palette.js — the order itself is the safety
+     mechanism, not decoration. A 9th+ provider folds into "Other" rather
+     than generating a new hue (see ProviderShareChart). */
+  --chart-1: #3987e5; /* blue */
+  --chart-2: #d95926; /* orange */
+  --chart-3: #199e70; /* aqua */
+  --chart-4: #c98500; /* yellow */
+  --chart-5: #d55181; /* magenta */
+  --chart-6: #008300; /* green */
+  --chart-7: #9085e9; /* violet */
+  --chart-8: #e66767; /* red */
+  --chart-other: #8b98ab; /* muted — "Other" bucket, not a validated hue slot */
 
   /* Type */
   --font-ui: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;

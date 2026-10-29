@@ -1,0 +1,6 @@
+.chart-empty {
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+  padding: var(--space-5) 0;
+  text-align: center;
+}
