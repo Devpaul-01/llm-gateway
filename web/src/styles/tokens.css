@@ -1,0 +1,117 @@
+/* Design tokens for the Gateway Console.
+   Dark instrument-panel theme: numbers are the hero, status color is
+   reserved for real signal (success/warn/fail), never decoration. */
+
+:root {
+  /* Surfaces */
+  --bg: #0a0e14;
+  --surface: #121820;
+  --surface-raised: #161e29;
+  --border: #1c2531;
+  --border-strong: #273142;
+
+  /* Text */
+  --text: #e4e9f0;
+  --text-muted: #8b98ab;
+  --text-faint: #576276;
+
+  /* Signal colors — reserved for real status, never decorative */
+  --accent: #4fd1c5;
+  --accent-dim: #2d7a72;
+  --warn: #f0b429;
+  --warn-dim: #8a6516;
+  --error: #e85d5d;
+  --error-dim: #8a3535;
+
+  /* Provider/category palette for charts — distinct, desaturated hues */
+  --chart-1: #4fd1c5;
+  --chart-2: #6c8ef2;
+  --chart-3: #f0b429;
+  --chart-4: #c77dff;
+  --chart-5: #5fd98a;
+  --chart-6: #e85d5d;
+  --chart-7: #ff9f6b;
+  --chart-8: #8b98ab;
+
+  /* Type */
+  --font-ui: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  --text-3xl: 2.75rem;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+
+  --sidebar-width: 220px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button,
+input,
+select {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+/* Visible keyboard focus everywhere */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
