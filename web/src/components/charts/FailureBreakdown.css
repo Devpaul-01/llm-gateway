@@ -1,0 +1,47 @@
+.failure-breakdown {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 100px;
+}
+
+.failure-breakdown__bar {
+  display: flex;
+  height: 8px;
+  width: 80px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.failure-breakdown__segment {
+  height: 100%;
+}
+
+/* Fixed, meaningful colors -- not the generic categorical palette --
+   because these three categories are always the same three things:
+   a transient upstream issue, a bad/revoked key, or an unrecognized
+   model name (internal/providers/errors.go). */
+.failure-breakdown__segment--provider_transient {
+  background: var(--warn);
+}
+
+.failure-breakdown__segment--key_fault {
+  background: var(--error);
+}
+
+.failure-breakdown__segment--bad_model {
+  background: var(--chart-7);
+}
+
+.failure-breakdown__total {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.failure-breakdown__empty {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
