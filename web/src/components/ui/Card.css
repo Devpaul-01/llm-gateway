@@ -21,4 +21,7 @@
 
 .card__body {
   padding: var(--space-5);
+  /* A wide table (Providers, Requests) scrolls within the card rather
+     than pushing the page itself into horizontal scroll. */
+  overflow-x: auto;
 }
