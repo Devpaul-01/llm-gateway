@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { useCreateCredential, useRevokeCredential } from '../../api/mutations';
 import { useCredentials, useProviderNames } from '../../api/queries';
-import { Badge, lifecycleTone } from '../../components/ui/Badge';
+import { Badge } from '../../components/ui/Badge';
+import { lifecycleTone } from '../../components/ui/badgeTone';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';

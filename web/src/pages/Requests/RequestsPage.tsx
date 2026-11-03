@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useMetrics } from '../../api/queries';
 import type { Window } from '../../api/types';
-import { Badge, statusTone } from '../../components/ui/Badge';
+import { Badge } from '../../components/ui/Badge';
+import { statusTone } from '../../components/ui/badgeTone';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ErrorBanner } from '../../components/ui/ErrorBanner';

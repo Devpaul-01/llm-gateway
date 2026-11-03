@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { useCreateGatewayKey, useRevokeGatewayKey } from '../../api/mutations';
 import { useGatewayKeys } from '../../api/queries';
-import { Badge, lifecycleTone } from '../../components/ui/Badge';
+import { Badge } from '../../components/ui/Badge';
+import { lifecycleTone } from '../../components/ui/badgeTone';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
