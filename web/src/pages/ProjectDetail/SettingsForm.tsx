@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useUpdateProjectSettings } from '../../api/mutations';
 import type { Project } from '../../api/types';
 import { Button } from '../../components/ui/Button';
@@ -24,19 +24,39 @@ function toUpdatePayload(raw: string): number | null | undefined {
   return Math.floor(n);
 }
 
+function fieldsFromProject(project: Project) {
+  return {
+    rateLimit: project.rate_limit_per_min != null ? String(project.rate_limit_per_min) : '',
+    concurrency: project.max_concurrent_streams != null ? String(project.max_concurrent_streams) : '',
+    tokenBudget: project.token_budget != null ? String(project.token_budget) : '',
+  };
+}
+
 export function SettingsForm({ project }: SettingsFormProps) {
-  const [rateLimit, setRateLimit] = useState('');
-  const [concurrency, setConcurrency] = useState('');
-  const [tokenBudget, setTokenBudget] = useState('');
+  // Tracks which project's settings are currently reflected in state, so a
+  // changed (or freshly refetched) `project` can be synced during render --
+  // React's documented alternative to an effect for "adjust state when a
+  // prop changes" -- instead of a setState-in-effect render-then-render.
+  const [syncedFrom, setSyncedFrom] = useState(project);
+  const [rateLimit, setRateLimit] = useState(() => fieldsFromProject(project).rateLimit);
+  const [concurrency, setConcurrency] = useState(() => fieldsFromProject(project).concurrency);
+  const [tokenBudget, setTokenBudget] = useState(() => fieldsFromProject(project).tokenBudget);
   const [dirty, setDirty] = useState(false);
   const mutation = useUpdateProjectSettings(project.id);
 
-  useEffect(() => {
-    setRateLimit(project.rate_limit_per_min != null ? String(project.rate_limit_per_min) : '');
-    setConcurrency(project.max_concurrent_streams != null ? String(project.max_concurrent_streams) : '');
-    setTokenBudget(project.token_budget != null ? String(project.token_budget) : '');
+  if (
+    project.id !== syncedFrom.id ||
+    project.rate_limit_per_min !== syncedFrom.rate_limit_per_min ||
+    project.max_concurrent_streams !== syncedFrom.max_concurrent_streams ||
+    project.token_budget !== syncedFrom.token_budget
+  ) {
+    const fields = fieldsFromProject(project);
+    setSyncedFrom(project);
+    setRateLimit(fields.rateLimit);
+    setConcurrency(fields.concurrency);
+    setTokenBudget(fields.tokenBudget);
     setDirty(false);
-  }, [project.id, project.rate_limit_per_min, project.max_concurrent_streams, project.token_budget]);
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
