@@ -2,7 +2,7 @@ import { useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from '../api/client';
 import { api } from '../api/endpoints';
 import { Button } from '../components/ui/Button';
-import { useToken } from './TokenContext';
+import { useToken } from './useToken';
 import './TokenGate.css';
 
 /** Gates the app behind the admin token. The backend has no login

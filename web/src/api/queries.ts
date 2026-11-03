@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useToken } from '../auth/TokenContext';
+import { useToken } from '../auth/useToken';
 import { api } from './endpoints';
 import { queryKeys } from './queryKeys';
 import type { Window } from './types';
