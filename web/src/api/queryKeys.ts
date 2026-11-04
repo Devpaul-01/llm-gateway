@@ -3,6 +3,7 @@ import type { Window } from './types';
 /** Centralized query keys so mutations can invalidate precisely. */
 export const queryKeys = {
   metrics: (window: Window, projectId?: string) => ['metrics', window, projectId ?? 'all'] as const,
+  publicMetrics: (window: Window) => ['public-metrics', window] as const,
   providers: () => ['providers'] as const,
   projects: () => ['projects'] as const,
   project: (id: string) => ['projects', id] as const,

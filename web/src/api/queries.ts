@@ -20,6 +20,21 @@ export function useMetrics(window: Window, projectId?: string) {
   });
 }
 
+/** Unauthenticated: hits GET /public/metrics (no admin token, see
+ * api/endpoints.ts#publicMetrics). Used only by the public demo page,
+ * which is not behind TokenGate -- so this deliberately does not depend
+ * on useToken at all, unlike useMetrics above. react-query's default
+ * retry/backoff is left in place; DemoPage treats any eventual isError
+ * as "no live gateway reachable" and falls back to the recorded run. */
+export function usePublicMetrics(window: Window) {
+  return useQuery({
+    queryKey: queryKeys.publicMetrics(window),
+    queryFn: () => api.publicMetrics(window),
+    refetchInterval: METRICS_POLL_MS,
+    refetchIntervalInBackground: false,
+  });
+}
+
 export function useProviderNames() {
   const { token } = useToken();
   return useQuery({
