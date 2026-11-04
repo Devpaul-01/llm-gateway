@@ -11,6 +11,27 @@ import { ProvidersPage } from './pages/Providers/ProvidersPage';
 import { ProjectsPage } from './pages/Projects/ProjectsPage';
 import { ProjectDetailPage } from './pages/ProjectDetail/ProjectDetailPage';
 import { RequestsPage } from './pages/Requests/RequestsPage';
+import { DemoPage } from './pages/Demo/DemoPage';
+
+/** Everything that needs an admin token: gated behind TokenGate, wrapped
+ * in the admin sidebar shell. /demo is intentionally not part of this —
+ * it is the one page meant for someone with no token at all. */
+function AdminApp() {
+  return (
+    <TokenGate>
+      <AppShell>
+        <Routes>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/providers" element={<ProvidersPage />} />
+          <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
+          <Route path="/requests" element={<RequestsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AppShell>
+    </TokenGate>
+  );
+}
 
 function AppRoutes() {
   const { clearToken } = useToken();
@@ -36,20 +57,12 @@ function AppRoutes() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <TokenGate>
-        <BrowserRouter>
-          <AppShell>
-            <Routes>
-              <Route path="/" element={<DashboardPage />} />
-              <Route path="/providers" element={<ProvidersPage />} />
-              <Route path="/projects" element={<ProjectsPage />} />
-              <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
-              <Route path="/requests" element={<RequestsPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </AppShell>
-        </BrowserRouter>
-      </TokenGate>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/demo" element={<DemoPage />} />
+          <Route path="/*" element={<AdminApp />} />
+        </Routes>
+      </BrowserRouter>
     </QueryClientProvider>
   );
 }
