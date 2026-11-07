@@ -6,6 +6,10 @@ const LABELS: Record<Window, string> = {
   '6h': '6h',
   '24h': '24h',
   '7d': '7d',
+  // Not shown here (WINDOWS omits it -- see api/types.ts), only used
+  // directly by the public Demo page. Still required because LABELS is
+  // keyed by the full Window type.
+  all: 'All time',
 };
 
 interface WindowPickerProps {

@@ -16,9 +16,17 @@ import './DemoPage.css';
  * demo") will populate this live, and the page labels itself LIVE.
  * With nothing reachable -- the far more common case for a cold link --
  * it falls back to RECORDED_RUN, a real captured response from that same
- * recipe, and says so plainly rather than pretending it's live. */
+ * recipe, and says so plainly rather than pretending it's live.
+ *
+ * Requests the 'all' window rather than a fixed lookback like '1h': this
+ * page is often the first thing a visitor opens, at no predictable time
+ * relative to whenever the gateway last saw traffic (seeded demo data,
+ * infrequent real usage), so a fixed recent window would show "recorded"
+ * even on a perfectly healthy gateway just because nothing happened in
+ * the last hour. 'all' only changes what this page asks for; the admin
+ * dashboard's own window picker is unaffected. */
 export function DemoPage() {
-  const { data, isLoading, isError } = usePublicMetrics('1h');
+  const { data, isLoading, isError } = usePublicMetrics('all');
 
   const live = !isError && !isLoading && !!data && data.reliability.requests > 0;
   const report: Report = live ? data : RECORDED_RUN;

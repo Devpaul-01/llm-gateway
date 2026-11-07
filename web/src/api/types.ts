@@ -6,7 +6,11 @@
  * conflated in the UI.
  */
 
-export type Window = '1h' | '6h' | '24h' | '7d';
+// 'all' is accepted by the backend (see internal/insights.windows) but is
+// deliberately left out of WINDOWS below: it's only ever requested directly
+// by the public Demo page, not offered as an option in the admin
+// WindowPicker.
+export type Window = '1h' | '6h' | '24h' | '7d' | 'all';
 
 export const WINDOWS: Window[] = ['1h', '6h', '24h', '7d'];
 
