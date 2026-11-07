@@ -1,20 +1,15 @@
 import { useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
 import { useCreateProject } from '../../api/mutations';
 import { useProjects } from '../../api/queries';
-import { Badge } from '../../components/ui/Badge';
-import { lifecycleTone } from '../../components/ui/badgeTone';
 import { Button } from '../../components/ui/Button';
-import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ErrorBanner } from '../../components/ui/ErrorBanner';
 import { Field } from '../../components/ui/Field';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
+import { ProjectCard } from '../../components/ui/ProjectCard';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { PageHeader } from '../../components/layout/PageHeader';
-import { formatCount, formatDateTime } from '../../lib/format';
-import '../../components/ui/Table.css';
 
 export function ProjectsPage() {
   const { data: projects, isLoading, isError, error, refetch } = useProjects();
@@ -35,13 +30,15 @@ export function ProjectsPage() {
       {isError && <ErrorBanner error={error} onRetry={refetch} />}
 
       {isLoading && (
-        <Card>
-          <Skeleton height="180px" />
-        </Card>
+        <div className="project-cards">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} height="140px" />
+          ))}
+        </div>
       )}
 
       {projects && !isLoading && (
-        <Card>
+        <>
           {projects.length === 0 ? (
             <EmptyState
               title="No projects yet"
@@ -53,40 +50,13 @@ export function ProjectsPage() {
               }
             />
           ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Status</th>
-                  <th className="num">Rate limit / min</th>
-                  <th className="num">Max concurrent streams</th>
-                  <th className="num">Token budget</th>
-                  <th>Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {projects.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      <Link to={`/projects/${p.id}`} className="table-link">
-                        {p.name}
-                      </Link>
-                    </td>
-                    <td>
-                      <Badge tone={lifecycleTone(p.status)}>{p.status}</Badge>
-                    </td>
-                    <td className="num">{p.rate_limit_per_min != null ? formatCount(p.rate_limit_per_min) : 'default'}</td>
-                    <td className="num">
-                      {p.max_concurrent_streams != null ? formatCount(p.max_concurrent_streams) : 'default'}
-                    </td>
-                    <td className="num">{p.token_budget != null ? formatCount(p.token_budget) : 'default'}</td>
-                    <td className="mono">{formatDateTime(p.created_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="project-cards">
+              {projects.map((p) => (
+                <ProjectCard key={p.id} project={p} />
+              ))}
+            </div>
           )}
-        </Card>
+        </>
       )}
 
       {showCreate && <CreateProjectModal onClose={() => setShowCreate(false)} />}
