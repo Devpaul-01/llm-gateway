@@ -22,10 +22,16 @@ import (
 
 type Window struct {
 	Name     string
-	Interval string // Postgres interval literal
-	Hours    int
-	BucketS  int // timeseries bucket size in seconds
+	Interval string // Postgres interval literal; ignored when Unbounded is set
+	Hours    int    // also caps how far back the Redis counters (8-day TTL) can reach
+	BucketS  int    // timeseries bucket size in seconds
 	Bucket   string
+	// Unbounded, when set, drops the created_at filter from the SQL scope
+	// entirely instead of using Interval: request_logs is queried with no
+	// lower bound. Hours still caps the Redis-backed counters (rate
+	// limit/budget/circuit-breaker events expire after 8 days there, so
+	// nothing before that is readable regardless) and the timeseries span.
+	Unbounded bool
 }
 
 var windows = map[string]Window{
@@ -33,6 +39,13 @@ var windows = map[string]Window{
 	"6h":  {Name: "6h", Interval: "6 hours", Hours: 6, BucketS: 300, Bucket: "5 minutes"},
 	"24h": {Name: "24h", Interval: "24 hours", Hours: 24, BucketS: 900, Bucket: "15 minutes"},
 	"7d":  {Name: "7d", Interval: "7 days", Hours: 168, BucketS: 7200, Bucket: "2 hours"},
+	// All-time: every request_logs row ever written, no lower bound. Meant
+	// for the public, unauthenticated /demo page, where seeded or sparse
+	// traffic shouldn't age out of a fixed window just because of when a
+	// visitor happens to load the page. Hours is capped at the Redis
+	// counters' own 8-day TTL (see stats.bucketTTL) since nothing older
+	// than that is readable from Redis no matter what's requested.
+	"all": {Name: "all", Hours: 192, BucketS: 86400, Bucket: "1 day", Unbounded: true},
 }
 
 // ParseWindow maps a user-supplied window name to a vetted Window. Anything
@@ -166,7 +179,15 @@ func ratio(num, den int64) *float64 {
 }
 
 // scope builds the shared WHERE clause. projectID == "" means all projects.
+// w.Unbounded drops the created_at lower bound entirely rather than using
+// w.Interval, so the query covers every row regardless of age.
 func scope(projectID string, w Window) (string, []interface{}) {
+	if w.Unbounded {
+		if projectID == "" {
+			return "true", nil
+		}
+		return "project_id = $1::uuid", []interface{}{projectID}
+	}
 	if projectID == "" {
 		return "created_at >= now() - $1::interval", []interface{}{w.Interval}
 	}
@@ -386,7 +407,26 @@ func timeseries(ctx context.Context, db *sql.DB, where string, args []interface{
 	// Fill empty buckets with zeros so charts have a continuous x-axis.
 	step := int64(w.BucketS)
 	end := time.Now().Unix() / step * step
-	start := end - int64(w.Hours)*3600/step*step
+	var start int64
+	if w.Unbounded {
+		// The fixed windows always back-fill a known-width span (e.g. the
+		// last 24h), but "all" has no fixed width: data could start
+		// anywhere. Span from the earliest bucket actually returned,
+		// rather than a fixed lookback, so the chart doesn't pad out to a
+		// wide empty range when all the data is recent (fresh seed data,
+		// a newly started gateway) and doesn't cut off older data either.
+		if len(got) == 0 {
+			return []Point{}, nil
+		}
+		start = end
+		for t := range got {
+			if t < start {
+				start = t
+			}
+		}
+	} else {
+		start = end - int64(w.Hours)*3600/step*step
+	}
 	points := make([]Point, 0, (end-start)/step+1)
 	for t := start; t <= end; t += step {
 		if p, ok := got[t]; ok {

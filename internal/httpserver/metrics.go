@@ -13,7 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// handleAdminMetrics: GET /admin/metrics?project_id=<uuid, optional>&window=1h|6h|24h|7d
+// handleAdminMetrics: GET /admin/metrics?project_id=<uuid, optional>&window=1h|6h|24h|7d|all
 func handleAdminMetrics(db *sql.DB, rdb *redis.Client, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		report, err := insights.Collect(r.Context(), db, rdb, r.URL.Query().Get("project_id"), insights.ParseWindow(r.URL.Query().Get("window")))
