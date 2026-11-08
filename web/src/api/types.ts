@@ -2,7 +2,7 @@
  * Types mirroring internal/insights/insights.go and internal/httpserver's
  * admin request/response structs exactly. Every nullable Go field
  * (sql.NullFloat64, *int, *float64) is typed `| null` here on purpose —
- * see docs/FRONTEND_ARCHITECTURE.md §6: null and zero must never be
+ * see ARCHITECTURE.md §16: null and zero must never be
  * conflated in the UI.
  */
 

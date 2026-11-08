@@ -2,7 +2,7 @@
 
 The admin/observability dashboard for the LLM Gateway. React + TypeScript +
 Vite, talking directly to the gateway's `/admin/*` API. See
-[`../docs/FRONTEND_ARCHITECTURE.md`](../docs/FRONTEND_ARCHITECTURE.md) for
+[`../ARCHITECTURE.md`](../ARCHITECTURE.md#16-frontend-architecture-summary) for
 the full architecture, including why this must be served same-origin with
 the gateway in production (the backend's `/admin/*` routes have no CORS).
 

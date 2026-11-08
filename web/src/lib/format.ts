@@ -1,7 +1,7 @@
 /**
  * Null-safe formatting. Every function here treats `null`/`undefined` as
  * "no data" and returns the DASH sentinel — it must never render as 0 or
- * 0%. See docs/FRONTEND_ARCHITECTURE.md §6.
+ * 0%. See ARCHITECTURE.md §16.
  */
 
 export const DASH = '—';
