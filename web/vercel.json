@@ -2,6 +2,6 @@
   "rewrites": [
     { "source": "/admin/:path*", "destination": "https://llm-gateway-production-e082.up.railway.app/admin/:path*" },
     { "source": "/public/:path*", "destination": "https://llm-gateway-production-e082.up.railway.app/public/:path*" },
-    { "source": "/((?!admin|public).*)", "destination": "/index.html" }
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
