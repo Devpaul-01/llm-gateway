@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useCreateCredential, useRevokeCredential } from '../../api/mutations';
-import { useCredentials, useProviderNames } from '../../api/queries';
+import type { CredentialMetadata } from '../../api/types';
 import { Badge } from '../../components/ui/Badge';
 import { lifecycleTone } from '../../components/ui/badgeTone';
 import { Button } from '../../components/ui/Button';
@@ -14,8 +14,47 @@ import { Skeleton } from '../../components/ui/Skeleton';
 import { formatDateTime } from '../../lib/format';
 import '../../components/ui/Table.css';
 
+// --- SCREENSHOT MOCK DATA ---------------------------------------------
+// Hardcoded fixture so this panel renders with realistic data without a
+// seeded database or a running gateway. Remove this block (and the
+// useCredentials call it replaces below) before merging back to main.
+const MOCK_CREDENTIALS: CredentialMetadata[] = [
+  {
+    id: 'cred_openai_441',
+    project_id: 'proj_prod_7f2a',
+    provider: 'openai',
+    label: 'primary',
+    status: 'active',
+    created_at: '2026-08-02T10:20:00Z',
+    last_used_at: '2026-11-12T17:59:41Z',
+  },
+  {
+    id: 'cred_anthropic_118',
+    project_id: 'proj_prod_7f2a',
+    provider: 'anthropic',
+    label: 'primary',
+    status: 'active',
+    created_at: '2026-08-02T10:21:00Z',
+    last_used_at: '2026-11-12T17:59:22Z',
+  },
+  {
+    id: 'cred_openai_old_055',
+    project_id: 'proj_prod_7f2a',
+    provider: 'openai',
+    label: 'legacy-key',
+    status: 'revoked',
+    created_at: '2026-08-02T10:22:00Z',
+    last_used_at: '2026-09-30T04:11:00Z',
+  },
+];
+// --- END SCREENSHOT MOCK DATA ------------------------------------------
+
 export function CredentialsPanel({ projectId }: { projectId: string }) {
-  const { data: credentials, isLoading, isError, error, refetch } = useCredentials(projectId);
+  const credentials = MOCK_CREDENTIALS;
+  const isLoading = false;
+  const isError = false;
+  const error = null;
+  const refetch = () => {};
   const [showCreate, setShowCreate] = useState(false);
   const revoke = useRevokeCredential(projectId);
 
@@ -87,13 +126,12 @@ export function CredentialsPanel({ projectId }: { projectId: string }) {
 }
 
 function CreateCredentialModal({ projectId, onClose }: { projectId: string; onClose: () => void }) {
-  const { data: providerData } = useProviderNames();
+  // SCREENSHOT MOCK DATA: hardcoded in place of useProviderNames().
+  const providers = ['openai', 'anthropic', 'mock-primary', 'mock-secondary'];
   const [provider, setProvider] = useState('');
   const [label, setLabel] = useState('');
   const [apiKey, setApiKey] = useState('');
   const create = useCreateCredential(projectId);
-
-  const providers = providerData?.providers ?? [];
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();

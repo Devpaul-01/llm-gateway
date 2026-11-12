@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useCreateGatewayKey, useRevokeGatewayKey } from '../../api/mutations';
-import { useGatewayKeys } from '../../api/queries';
+import type { GatewayKeyMetadata } from '../../api/types';
 import { Badge } from '../../components/ui/Badge';
 import { lifecycleTone } from '../../components/ui/badgeTone';
 import { Button } from '../../components/ui/Button';
@@ -15,8 +15,47 @@ import { formatDateTime } from '../../lib/format';
 import '../../components/ui/Table.css';
 import './GatewayKeysPanel.css';
 
+// --- SCREENSHOT MOCK DATA ---------------------------------------------
+// Hardcoded fixture so this panel renders with realistic data without a
+// seeded database or a running gateway. Remove this block (and the
+// useGatewayKeys call it replaces below) before merging back to main.
+const MOCK_GATEWAY_KEYS: GatewayKeyMetadata[] = [
+  {
+    id: 'gwk_a1b2c3',
+    project_id: 'proj_prod_7f2a',
+    key_prefix: 'gw_live_8f3a',
+    label: 'prod-server',
+    status: 'active',
+    created_at: '2026-08-02T10:25:00Z',
+    last_used_at: '2026-11-12T17:59:41Z',
+  },
+  {
+    id: 'gwk_d4e5f6',
+    project_id: 'proj_prod_7f2a',
+    key_prefix: 'gw_live_2c90',
+    label: 'ci-smoke-tests',
+    status: 'active',
+    created_at: '2026-09-15T12:00:00Z',
+    last_used_at: '2026-11-11T02:14:00Z',
+  },
+  {
+    id: 'gwk_old_712',
+    project_id: 'proj_prod_7f2a',
+    key_prefix: 'gw_live_0011',
+    label: 'rotated-out',
+    status: 'revoked',
+    created_at: '2026-08-02T10:26:00Z',
+    last_used_at: '2026-09-01T09:30:00Z',
+  },
+];
+// --- END SCREENSHOT MOCK DATA ------------------------------------------
+
 export function GatewayKeysPanel({ projectId }: { projectId: string }) {
-  const { data: keys, isLoading, isError, error, refetch } = useGatewayKeys(projectId);
+  const keys = MOCK_GATEWAY_KEYS;
+  const isLoading = false;
+  const isError = false;
+  const error = null;
+  const refetch = () => {};
   const [showCreate, setShowCreate] = useState(false);
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
   const revoke = useRevokeGatewayKey(projectId);

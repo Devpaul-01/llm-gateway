@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useCreateProject } from '../../api/mutations';
-import { useProjects } from '../../api/queries';
+import type { Project } from '../../api/types';
 import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ErrorBanner } from '../../components/ui/ErrorBanner';
@@ -11,8 +11,56 @@ import { ProjectCard } from '../../components/ui/ProjectCard';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { PageHeader } from '../../components/layout/PageHeader';
 
+// --- SCREENSHOT MOCK DATA ---------------------------------------------
+// Hardcoded fixture so this page renders with realistic data without a
+// seeded database or a running gateway. Remove this block (and the
+// useProjects call it replaces below) before merging back to main.
+const MOCK_PROJECTS: Project[] = [
+  {
+    id: 'proj_prod_7f2a',
+    name: 'production',
+    status: 'active',
+    rate_limit_per_min: 6000,
+    max_concurrent_streams: 128,
+    token_budget: 5_000_000,
+    created_at: '2026-08-02T10:15:00Z',
+  },
+  {
+    id: 'proj_staging_3c91',
+    name: 'staging',
+    status: 'active',
+    rate_limit_per_min: 1200,
+    max_concurrent_streams: 32,
+    token_budget: null,
+    created_at: '2026-08-14T09:05:00Z',
+  },
+  {
+    id: 'proj_internal_tools_9b0d',
+    name: 'internal-tools',
+    status: 'active',
+    rate_limit_per_min: null,
+    max_concurrent_streams: 16,
+    token_budget: 250_000,
+    created_at: '2026-09-28T16:42:00Z',
+  },
+  {
+    id: 'proj_legacy_a114',
+    name: 'legacy-batch',
+    status: 'suspended',
+    rate_limit_per_min: 300,
+    max_concurrent_streams: 4,
+    token_budget: 50_000,
+    created_at: '2026-05-11T08:20:00Z',
+  },
+];
+// --- END SCREENSHOT MOCK DATA ------------------------------------------
+
 export function ProjectsPage() {
-  const { data: projects, isLoading, isError, error, refetch } = useProjects();
+  const projects = MOCK_PROJECTS;
+  const isLoading = false;
+  const isError = false;
+  const error = null;
+  const refetch = () => {};
   const [showCreate, setShowCreate] = useState(false);
 
   return (

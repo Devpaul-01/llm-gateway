@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useFlushProjectCache } from '../../api/mutations';
-import { useProject } from '../../api/queries';
+import type { Project } from '../../api/types';
 import { Badge } from '../../components/ui/Badge';
 import { lifecycleTone } from '../../components/ui/badgeTone';
 import { Button } from '../../components/ui/Button';
@@ -14,9 +14,28 @@ import { GatewayKeysPanel } from './GatewayKeysPanel';
 import { SettingsForm } from './SettingsForm';
 import './ProjectDetailPage.css';
 
+// --- SCREENSHOT MOCK DATA ---------------------------------------------
+// Hardcoded fixture so this page renders with realistic data without a
+// seeded database or a running gateway. Remove this block (and the
+// useProject call it replaces below) before merging back to main.
+const MOCK_PROJECT: Project = {
+  id: 'proj_prod_7f2a',
+  name: 'production',
+  status: 'active',
+  rate_limit_per_min: 6000,
+  max_concurrent_streams: 128,
+  token_budget: 5_000_000,
+  created_at: '2026-08-02T10:15:00Z',
+};
+// --- END SCREENSHOT MOCK DATA ------------------------------------------
+
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const { data: project, isLoading, isError, error, refetch } = useProject(projectId);
+  const project = MOCK_PROJECT;
+  const isLoading = false;
+  const isError = false;
+  const error = null;
+  const refetch = () => {};
   const flushCache = useFlushProjectCache(projectId ?? '');
   const [flushed, setFlushed] = useState(false);
 
