@@ -298,6 +298,8 @@ Full package-by-package breakdown in [ARCHITECTURE.md §4](ARCHITECTURE.md#4-rep
 
 The `web/` app is the **Gateway Console** — a Vite + React 18 + TypeScript single-page app that is a pure client of the gateway's own API. It adds no backend of its own and no new routes to the Go service.
 
+![Dashboard — reliability, latency, cache, and token usage over a selectable window](docs/screenshots/dashboard.png)
+
 | Layer | Technology |
 |---|---|
 | Framework | React 18 (TypeScript), built/served with Vite |
