@@ -238,6 +238,8 @@ The single question every one of these metrics exists to answer, across the boar
 
 ## 16. The Public Demo Page
 
+**Live: [llm-gateway-bx27zp9oo-studyhubplatform.vercel.app/demo](https://llm-gateway-bx27zp9oo-studyhubplatform.vercel.app/demo)**
+
 A dedicated, token-free `/demo` page renders the same metrics dashboard data for anyone, with no admin credential required — specifically built so the product can be *shown*, not just described. It's intended for exactly the kind of audience this document is written for: someone evaluating the project who wants to see real failover and caching statistics without first standing up their own deployment and provider accounts. If the live metrics endpoint happens to be unreachable when someone visits, the page falls back to a recorded sample run rather than showing a broken or empty page — a small but deliberate product-polish decision: a demo that can show an error state to a first-time visitor is a demo that fails at the one thing it exists to do.
 
 ---
