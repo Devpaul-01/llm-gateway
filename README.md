@@ -135,6 +135,10 @@ npm run dev   # proxies /admin and /public to the gateway running on :8080
 
 Open it, paste in your `ADMIN_TOKEN`, and you have a live dashboard over the stack you just started.
 
+![Projects — rate limits, concurrency, and token budgets per project](docs/screenshots/projects.png)
+
+![Project detail — settings, provider credentials, and gateway keys for one project](docs/screenshots/project-detail.png)
+
 ---
 
 ## Providers
