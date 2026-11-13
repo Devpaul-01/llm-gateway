@@ -159,6 +159,8 @@ This is the same document both the Dashboard and the public `/demo` page in the 
 
 ## Try the Failover Demo (No API Keys)
 
+**→ [Live demo](https://llm-gateway-bx27zp9oo-studyhubplatform.vercel.app/demo)** — see real reliability/latency/cache numbers from a running gateway with zero setup, no login, no API key.
+
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
 docker compose exec gateway /app/loadtest seed -admin-url http://localhost:8080 -admin-token $ADMIN_TOKEN
