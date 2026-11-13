@@ -157,6 +157,8 @@ Built in: **groq, mistral, openrouter, gemini, openai, deepseek, together, firew
 
 One JSON document: `reliability` (success rate, **rescued by failover**, rescue rate, rate limits/outages absorbed, circuit reroutes), `latency` (p50/p95/p99, TTFT), `cache` (hit rate, tokens saved, speed-up), `usage`, `protection` (requests blocked by rate limit / budget / concurrency), `providers` (live scoreboard), `top_models`, a gap-filled `timeseries`, and the last 15 `recent` requests. Every field that can genuinely mean "no data" is `null`, never coerced to `0` — the Gateway Console renders that distinction explicitly rather than collapsing it.
 
+![Requests — the most recent requests handled by the gateway, across every project](docs/screenshots/requests.png)
+
 This is the same document both the Dashboard and the public `/demo` page in the Gateway Console render — see [Frontend](#frontend).
 
 ---
