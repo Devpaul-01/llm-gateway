@@ -219,6 +219,13 @@ llm-gateway is not an API-only product — it ships with a complete web-based ad
 - **Dashboard** — the first thing an operator sees: overall request volume, success rate, latency percentiles, how much failover is actually rescuing requests that would otherwise have failed, cache hit rate and tokens saved, and how much traffic was blocked by the cost-protection layer — all over a selectable time window (the last hour, six hours, day, or week), optionally filtered to one project.
 - **Providers** — a live scoreboard, one row per provider: share of traffic, success rate, latency, and a breakdown of *why* a given provider's failures happened (bad key, provider outage, unknown model) — including providers that have failed on every single attempt and never once produced a successful answer, so a total outage on one provider is visible here rather than silently invisible because it never shows up in "successful request" statistics.
 - **Projects** — create projects, and drill into one to manage its settings (rate limit, concurrency, budget), its provider credentials, and its gateway keys, all in one place scoped to that project.
+
+  ![New project modal](docs/screenshots/new-project-modal.png)
+
+  ![Add provider credential modal](docs/screenshots/add-credential-modal.png)
+
+  ![New gateway key modal](docs/screenshots/new-gateway-key-modal.png)
+
 - **Requests** — a live feed of the most recent individual requests, with status, provider/model, timing, token counts, and whether each one was served from cache.
 
 The console deliberately shows the difference between "no data" and "zero" everywhere a number could mean either — a latency figure with zero requests in the selected window is shown as a clear, distinct dash, never as a misleading "0ms," because those two things mean genuinely different situations and collapsing them into one display would misrepresent what actually happened.
