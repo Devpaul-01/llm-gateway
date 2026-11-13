@@ -3,7 +3,7 @@
 ![CI](https://github.com/Devpaul-01/llm-gateway/actions/workflows/ci.yml/badge.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**[Architecture](ARCHITECTURE.md) · [Product Overview](PRODUCT_OVERVIEW.md) · [Security Policy](SECURITY.md) · [Changelog](CHANGELOG.md)**
+**[Live Demo](https://llm-gateway-bx27zp9oo-studyhubplatform.vercel.app/demo) · [Architecture](ARCHITECTURE.md) · [Product Overview](PRODUCT_OVERVIEW.md) · [Security Policy](SECURITY.md) · [Changelog](CHANGELOG.md)**
 
 llm-gateway is a self-hostable, **open source**, OpenAI-compatible reverse proxy that sits between your application and one or more LLM providers and makes that connection **reliable, fast, and cost-controlled** — without your application changing anything except the `base_url` it already points an OpenAI SDK at.
 
