@@ -311,6 +311,8 @@ The `web/` app is the **Gateway Console** — a Vite + React 18 + TypeScript sin
 
 **Pages:** Dashboard (reliability/latency/cache charts over a selectable window), Providers (per-provider scoreboard), Projects / Project Detail (settings, credentials, gateway keys), Requests (recent activity table), and a public, token-free `/demo` page that renders the `all`-window public metrics report for visitors with no admin token — falling back to a recorded-run fixture if the live endpoint is unreachable, so the demo never shows a broken page to a first-time visitor.
 
+![Providers — reliability, latency, and failure breakdown for every upstream the gateway has routed to](docs/screenshots/providers.png)
+
 **It mirrors the backend's own correctness decisions in the UI**, not just its data: every latency/rate figure the backend can legitimately report as "no data" (a JSON `null`) is rendered as a visually distinct "—", never coerced to `0`, because collapsing that distinction would misrepresent real data.
 
 **Deployment note:** because `/admin/*` intentionally has no CORS headers (see [Security](#security)), the Gateway Console **must** be served same-origin with the gateway in any real deployment — a reverse-proxy routing decision at deploy time, not something the backend widens its CORS policy to work around.
