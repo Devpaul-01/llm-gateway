@@ -518,6 +518,8 @@ The `Dockerfile` is a two-stage build: a full `golang:1.25-bookworm` build stage
 
 This section covers the Gateway Console (`web/`) as part of the whole-system view.
 
+![Admin token gate — the one credential the Gateway Console asks for before anything else loads](docs/screenshots/token-gate.png)
+
 - **Stack:** React 18 + TypeScript, Vite, React Router, TanStack Query (all server state), Recharts, plain CSS with design tokens for a dark theme. No state-management library beyond TanStack Query, no CSS framework, no GraphQL.
 - **It is a pure client of the gateway's own API** — no backend of its own, no new routes added to the Go service to support it, no mocked data in production use (local dev proxies `/admin` and `/public` through Vite's dev server to a real running gateway).
 - **Pages:** Dashboard (overview + charts), Providers (per-provider scoreboard), Projects / Project Detail (settings, credentials, gateway keys — scoped per-project, matching the backend's own data model), Requests (recent activity table), and a public, token-free `/demo` page that renders the `all`-window public metrics report for visitors with no admin token, falling back to a recorded-run fixture if the live endpoint is unreachable.
